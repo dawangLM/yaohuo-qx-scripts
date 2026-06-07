@@ -20,10 +20,11 @@ function saveCookieFromRequest() {
 
   if (cookie && $request.url.includes(HOST)) {
     $persistentStore.write(cookie, COOKIE_KEY);
-    $notify("妖火 CK 已更新", "", "Cookie 已保存到本机 Quantumult X");
+    const savedAt = new Date().toLocaleString();
+    $notify("妖火 CK 获取成功", `长度：${cookie.length}`, `已保存到本机 Quantumult X\n${savedAt}`);
   }
 
-  $done({});
+  $done({ headers });
 }
 
 function fetchPage(url, cookie) {

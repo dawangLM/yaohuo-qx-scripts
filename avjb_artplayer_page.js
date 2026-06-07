@@ -15,6 +15,7 @@
     requestTimeoutMs: 15000,
     playbackAssumedLastIndex: 4095,
     hlsSegmentDurationSec: 2,
+    useEmbedIframeOnVideoPages: true,
     downloadWorkers: 12,
     downloadRetries: 4,
     downloadRetryDelayMs: 500,
@@ -96,6 +97,14 @@
     const match = String(pathname || "").match(/\/(?:video|videos|newembed)\/(\d+)(?:\/|$)/i);
     if (!match) return null;
     return { videoId: Number(match[1]) };
+  }
+
+  function isEmbedPage(pathname) {
+    return /\/newembed\/\d+(?:\/|$)/i.test(String(pathname || ""));
+  }
+
+  function shouldUseEmbedIframe(pathname) {
+    return config.useEmbedIframeOnVideoPages && /\/(?:video|videos)\/\d+(?:\/|$)/i.test(String(pathname || ""));
   }
 
   function cleanFilename(title, fallback) {
@@ -350,6 +359,7 @@
       document.querySelector(".block-video .video-holder .player-wrap") ||
       document.querySelector(".block-video .video-holder") ||
       document.querySelector(".block-video .player-holder") ||
+      document.querySelector("#player .package") ||
       document.querySelector("#mse")?.parentElement ||
       document.querySelector("#player.container");
   }
@@ -375,6 +385,35 @@
     return element;
   }
 
+  function mountEmbedIframe(host, videoId) {
+    if (state.art) {
+      try { state.art.destroy(false); } catch (_) {}
+      state.art = null;
+    }
+    if (state.playlistBlobUrl) {
+      URL.revokeObjectURL(state.playlistBlobUrl);
+      state.playlistBlobUrl = null;
+    }
+
+    prepareHost(host);
+    const iframe = document.createElement("iframe");
+    iframe.id = "__avjb_artplayer_embed_iframe__";
+    iframe.src = `${location.origin}/newembed/${videoId}`;
+    iframe.allow = "autoplay; fullscreen; picture-in-picture";
+    iframe.setAttribute("allowfullscreen", "");
+    iframe.setAttribute("webkitallowfullscreen", "");
+    iframe.setAttribute("mozallowfullscreen", "");
+    iframe.style.position = "absolute";
+    iframe.style.inset = "0";
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
+    iframe.style.border = "0";
+    iframe.style.background = "#000";
+    host.appendChild(iframe);
+    state.mountedVideoId = videoId;
+    log("embed iframe mounted for native signed source context", { videoId, src: iframe.src });
+  }
+
   async function bootstrapPlayer(force = false) {
     if (state.runningBootstrap) return;
     const parsed = parseVideoFromPath(location.pathname);
@@ -383,10 +422,14 @@
 
     state.runningBootstrap = true;
     try {
-      await loadLibraries();
-      const ctx = await getPlaybackContext(true);
       const host = playerHost();
       if (!host) throw new Error("player container not found");
+      if (shouldUseEmbedIframe(location.pathname)) {
+        mountEmbedIframe(host, parsed.videoId);
+        return;
+      }
+      await loadLibraries();
+      const ctx = await getPlaybackContext(true);
 
       if (state.art) {
         try { state.art.destroy(false); } catch (_) {}

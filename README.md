@@ -10,6 +10,7 @@ This converts the AVJB userscript-style Artplayer replacement into a Quantumult 
 
 - `avjb-qx-snippet.conf`: Quantumult X rewrite and MitM snippet.
 - `avjb_artplayer_qx.js`: Injects the browser-side player script into AVJB HTML responses.
+- `avjb_avstatic_request_headers_qx.js`: Normalizes AVStatic request `Referer`/`Origin` headers for signed m3u8 and segment URLs.
 - `avjb_cors_headers_qx.js`: Adds CORS response headers for AVStatic segment hosts.
 - `avjb_artplayer_page.js`: Runs inside the AVJB page. It loads Artplayer, hls.js, and mux.js, replaces the site player, adds source copy and MP4 download actions, probes/caches tail segment indexes, and removes common ad blocks.
 
@@ -25,9 +26,10 @@ Remote snippet URLs:
 
 ```text
 https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb-qx-snippet.conf
-https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_qx.js?v=20260608-6
-https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_cors_headers_qx.js?v=20260608-6
-https://cdn.jsdelivr.net/gh/dawangLM/yaohuo-qx-scripts@main/avjb_artplayer_page.js?v=20260608-6
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_qx.js?v=20260608-8
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_avstatic_request_headers_qx.js?v=20260608-8
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_cors_headers_qx.js?v=20260608-8
+https://cdn.jsdelivr.net/gh/dawangLM/yaohuo-qx-scripts@main/avjb_artplayer_page.js?v=20260608-8
 ```
 
 Notes:

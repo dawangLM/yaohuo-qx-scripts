@@ -3,6 +3,7 @@ const fs = require("fs");
 
 const injector = require("./avjb_artplayer_qx.js");
 const cors = require("./avjb_cors_headers_qx.js");
+const avstaticRequest = require("./avjb_avstatic_request_headers_qx.js");
 const pageUtils = require("./avjb_page_utils.js");
 
 assert(injector.DEFAULT_PAGE_SCRIPT_URL.includes("cdn.jsdelivr.net/gh/"), "default page script uses browser-executable CDN");
@@ -31,6 +32,11 @@ assert.strictEqual(headers["Access-Control-Allow-Methods"], "GET, HEAD, OPTIONS"
 assert.strictEqual(headers["Access-Control-Allow-Headers"], "*");
 assert.strictEqual(headers["Content-Type"], "video/mp2t");
 
+const requestHeaders = avstaticRequest.withAvstaticRequestHeaders({ Accept: "*/*", Referer: "https://avjb.cc/video/1/" });
+assert.strictEqual(requestHeaders.Referer, "https://avjb.cc/");
+assert.strictEqual(requestHeaders.Origin, "https://avjb.cc");
+assert.strictEqual(requestHeaders.Accept, "*/*");
+
 const loginCandidates = [
   { textContent: "已有账号，登录", offsetParent: {}, disabled: false },
 ];
@@ -53,9 +59,21 @@ const safeCookie = pageUtils.buildSafeCookie("CHfVnsdmCIzAl3P7", new Date("2026-
 assert(safeCookie.startsWith("_safe=CHfVnsdmCIzAl3P7; expires="), "builds _safe cookie");
 assert(safeCookie.endsWith("; path=/"), "safe cookie is scoped to root path");
 assert.strictEqual(pageUtils.extractSafeIdFromHtml("<script>var safeid='embedSafe123';</script>"), "embedSafe123", "extracts embed safeid");
+const signedM3u8 = "https://list.avstatic.com/signature/videos/37000/37529/index.m3u8";
+assert.strictEqual(pageUtils.extractM3u8FromHtml(`<script>var url = '${signedM3u8}';</script>`, "https://avjb.cc/newembed/37529"), signedM3u8, "extracts signed m3u8 from embed html");
+assert.strictEqual(pageUtils.shouldUseEmbedIframe("/video/37529/example/"), true, "main video pages use embed iframe");
+assert.strictEqual(pageUtils.shouldUseEmbedIframe("/videos/37529/example/"), true, "alternate video pages use embed iframe");
+assert.strictEqual(pageUtils.shouldUseEmbedIframe("/newembed/37529"), false, "embed pages mount Artplayer directly");
 
 const pageScript = fs.readFileSync("./avjb_artplayer_page.js", "utf8");
 assert(!pageScript.includes("unpkg.com"), "page script does not depend on unpkg");
 assert(pageScript.includes("cdn.jsdelivr.net/npm/hls.js"), "page script loads hls.js from jsDelivr");
+assert(pageScript.includes("mountEmbedIframe"), "page script can mount native embed iframe");
+assert(pageScript.includes("/newembed/"), "page script uses native embed route for video pages");
+
+const snippet = fs.readFileSync("./avjb-qx-snippet.conf", "utf8");
+assert(snippet.includes("script-request-header"), "snippet rewrites AVStatic request headers");
+assert(snippet.includes("avjb_avstatic_request_headers_qx.js?v=20260608-8"), "snippet uses versioned AVStatic request header script");
+assert(snippet.includes("script-response-header"), "snippet rewrites AVStatic response headers");
 
 console.log("avjb qx static tests passed");

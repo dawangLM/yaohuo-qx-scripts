@@ -28,6 +28,28 @@ function extractSafeIdFromHtml(html) {
   return match ? match[1] : "";
 }
 
+function extractM3u8FromHtml(html, baseUrl) {
+  const patterns = [
+    /var\s+url\s*=\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
+    /\burl\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]/i,
+    /['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/i,
+  ];
+  for (const pattern of patterns) {
+    const match = String(html || "").match(pattern);
+    if (!match || !match[1]) continue;
+    try {
+      return new URL(String(match[1]).replace(/\\u0026/gi, "&").replace(/\\\//g, "/"), baseUrl || "https://avjb.cc/").href;
+    } catch (_) {
+      return "";
+    }
+  }
+  return "";
+}
+
+function shouldUseEmbedIframe(pathname) {
+  return /\/(?:video|videos)\/\d+(?:\/|$)/i.test(String(pathname || ""));
+}
+
 function pickExistingAccountElement(candidates) {
   for (const element of Array.from(candidates || [])) {
     if (!isVisibleElement(element)) continue;
@@ -44,5 +66,7 @@ if (typeof module !== "undefined") {
     pickExistingAccountElement,
     buildSafeCookie,
     extractSafeIdFromHtml,
+    extractM3u8FromHtml,
+    shouldUseEmbedIframe,
   };
 }

@@ -181,6 +181,16 @@
     return null;
   }
 
+  function extractSafeIdFromHtml(html) {
+    const match = String(html || "").match(/safeid\s*=\s*['"]([^'"]+)['"]/);
+    return match ? match[1] : "";
+  }
+
+  function setSafeCookie(safeid) {
+    if (!safeid) return;
+    document.cookie = `_safe=${String(safeid)}; expires=${new Date(Date.now() + 31536000000).toGMTString()}; path=/`;
+  }
+
   function parsePlaylistStats(text) {
     let lastIndex = -1;
     let count = 0;
@@ -231,7 +241,13 @@
       }
     }
     if (!m3u8Url && allowNetwork) {
-      const embedHtml = await fetchText(embedUrl, { headers: { Referer: location.href } });
+      let embedHtml = await fetchText(embedUrl, { headers: { Referer: location.href } });
+      const embedSafeId = extractSafeIdFromHtml(embedHtml);
+      if (embedSafeId) {
+        log("embed safe gate detected, retrying original m3u8 lookup", { videoId, safeidLength: String(embedSafeId).length });
+        setSafeCookie(embedSafeId);
+        embedHtml = await fetchText(embedUrl, { headers: { Referer: location.href } });
+      }
       m3u8Url = parseM3u8FromText(embedHtml, embedUrl);
     }
     if (!m3u8Url) return null;

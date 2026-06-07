@@ -52,6 +52,7 @@ assert.strictEqual(pageUtils.pickExistingAccountElement([traditionalChinese]), t
 const safeCookie = pageUtils.buildSafeCookie("CHfVnsdmCIzAl3P7", new Date("2026-06-08T00:00:00Z"));
 assert(safeCookie.startsWith("_safe=CHfVnsdmCIzAl3P7; expires="), "builds _safe cookie");
 assert(safeCookie.endsWith("; path=/"), "safe cookie is scoped to root path");
+assert.strictEqual(pageUtils.extractSafeIdFromHtml("<script>var safeid='embedSafe123';</script>"), "embedSafe123", "extracts embed safeid");
 
 const pageScript = fs.readFileSync("./avjb_artplayer_page.js", "utf8");
 assert(!pageScript.includes("unpkg.com"), "page script does not depend on unpkg");

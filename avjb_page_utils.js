@@ -23,6 +23,11 @@ function buildSafeCookie(safeid, now) {
   return `_safe=${String(safeid || "")}; expires=${expiresAt.toGMTString()}; path=/`;
 }
 
+function extractSafeIdFromHtml(html) {
+  const match = String(html || "").match(/safeid\s*=\s*['"]([^'"]+)['"]/);
+  return match ? match[1] : "";
+}
+
 function pickExistingAccountElement(candidates) {
   for (const element of Array.from(candidates || [])) {
     if (!isVisibleElement(element)) continue;
@@ -38,5 +43,6 @@ if (typeof module !== "undefined") {
     isExistingAccountText,
     pickExistingAccountElement,
     buildSafeCookie,
+    extractSafeIdFromHtml,
   };
 }

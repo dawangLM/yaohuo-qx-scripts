@@ -1,4 +1,4 @@
-const DEFAULT_PAGE_SCRIPT_URL = "https://cdn.jsdelivr.net/gh/dawangLM/yaohuo-qx-scripts@main/avjb_artplayer_page.js?v=20260608-5";
+const DEFAULT_PAGE_SCRIPT_URL = "https://cdn.jsdelivr.net/gh/dawangLM/yaohuo-qx-scripts@main/avjb_artplayer_page.js?v=20260608-6";
 const LOADER_ID = "avjb-artplayer-qx-loader";
 
 function escapeForScript(value) {

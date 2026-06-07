@@ -25,9 +25,9 @@ Remote snippet URLs:
 
 ```text
 https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb-qx-snippet.conf
-https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_qx.js?v=20260608-3
-https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_cors_headers_qx.js?v=20260608-3
-https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_page.js?v=20260608-3
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_qx.js?v=20260608-4
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_cors_headers_qx.js?v=20260608-4
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_page.js?v=20260608-4
 ```
 
 Notes:

@@ -17,6 +17,11 @@ assert.strictEqual(reinjected, injected, "already injected HTML is unchanged");
 const noHead = "<html><body>ok</body></html>";
 assert(injector.injectIntoHtml(noHead, "https://example.com/a.js").includes("</body>"), "HTML without head is still handled");
 
+const safeShell = "<html><head></head><body><script>var safeid='CHfVnsdmCIzAl3P7';</script></body></html>";
+const safeInjected = injector.injectIntoHtml(safeShell, "https://example.com/avjb_artplayer_page.js");
+assert(safeInjected.includes("_safe=CHfVnsdmCIzAl3P7"), "safeid shell injects inline _safe cookie setter");
+assert(safeInjected.includes("location.reload()"), "safeid shell reloads without depending on external page script");
+
 const headers = cors.withCorsHeaders({ "Content-Type": "video/mp2t" });
 assert.strictEqual(headers["Access-Control-Allow-Origin"], "*");
 assert.strictEqual(headers["Access-Control-Allow-Methods"], "GET, HEAD, OPTIONS");

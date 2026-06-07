@@ -1,13 +1,32 @@
-const DEFAULT_PAGE_SCRIPT_URL = "https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_page.js?v=20260608-3";
+const DEFAULT_PAGE_SCRIPT_URL = "https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_page.js?v=20260608-4";
 const LOADER_ID = "avjb-artplayer-qx-loader";
 
 function escapeForScript(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-function buildLoader(pageScriptUrl) {
+function extractSafeId(body) {
+  const match = String(body || "").match(/safeid\s*=\s*['"]([^'"]+)['"]/);
+  return match ? match[1] : "";
+}
+
+function buildLoader(pageScriptUrl, safeId = "") {
+  const safeCookieValue = `_safe=${safeId}`;
+  const safeCookieLine = safeId ? `  var safeId = '${escapeForScript(safeId)}';
+  var safeCookieValue = '${escapeForScript(safeCookieValue)}';
+  var safeCookie = safeCookieValue + '; expires=' + new Date(Date.now() + 31536000000).toGMTString() + '; path=/';
+  var hasSafeCookie = String(document.cookie || '').split(';').map(function (item) { return item.trim(); }).indexOf(safeCookieValue) >= 0;
+  var reloadKey = 'avjb-qx-safe-reload-' + safeId;
+  if (!hasSafeCookie && sessionStorage.getItem(reloadKey) !== '1') {
+    document.cookie = safeCookie;
+    sessionStorage.setItem(reloadKey, '1');
+    location.reload();
+    return;
+  }
+` : "";
   return `<script id="${LOADER_ID}">
 (function () {
+${safeCookieLine}  window.__AVJB_QX_INLINE_BOOT_RAN__ = true;
   if (window.__AVJB_ARTPLAYER_QX_LOADED__) return;
   window.__AVJB_ARTPLAYER_QX_LOADED__ = true;
   var script = document.createElement('script');
@@ -25,7 +44,7 @@ function injectIntoHtml(body, pageScriptUrl = DEFAULT_PAGE_SCRIPT_URL) {
   const html = String(body || "");
   if (!html || html.includes(LOADER_ID)) return html;
 
-  const loader = buildLoader(pageScriptUrl);
+  const loader = buildLoader(pageScriptUrl, extractSafeId(html));
   if (/<\/head>/i.test(html)) {
     return html.replace(/<\/head>/i, `${loader}</head>`);
   }
@@ -44,6 +63,7 @@ if (typeof module !== "undefined") {
     DEFAULT_PAGE_SCRIPT_URL,
     LOADER_ID,
     buildLoader,
+    extractSafeId,
     injectIntoHtml,
   };
 }

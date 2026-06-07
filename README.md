@@ -1,15 +1,53 @@
-# Yaohuo Quantumult X Watcher
+# Quantumult X Scripts
+
+Small Quantumult X script collection.
+
+## AVJB Artplayer Rewrite
+
+This converts the AVJB userscript-style Artplayer replacement into a Quantumult X rewrite package.
+
+### AVJB Files
+
+- `avjb-qx-snippet.conf`: Quantumult X rewrite and MitM snippet.
+- `avjb_artplayer_qx.js`: Injects the browser-side player script into AVJB HTML responses.
+- `avjb_cors_headers_qx.js`: Adds CORS response headers for AVStatic segment hosts.
+- `avjb_artplayer_page.js`: Runs inside the AVJB page. It loads Artplayer, hls.js, and mux.js, replaces the site player, adds source copy and MP4 download actions, probes/caches tail segment indexes, and removes common ad blocks.
+
+### AVJB Setup
+
+1. Add the contents of `avjb-qx-snippet.conf` to Quantumult X.
+2. Enable rewrite and MitM, then trust the Quantumult X CA certificate on your device.
+3. Make sure these hostnames are included in `[mitm] hostname`: `avjb.cc`, `www.avjb.cc`, `list.avstatic.com`, `stat.avstatic.com`.
+4. Open an AVJB video page in Safari or a WebView that goes through Quantumult X.
+5. Use the replaced `下载` menu for `复制源`, `下载MP4`, or `取消`.
+
+Remote snippet URLs:
+
+```text
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb-qx-snippet.conf
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_qx.js
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_cors_headers_qx.js
+https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/avjb_artplayer_page.js
+```
+
+Notes:
+
+- Quantumult X cannot run Tampermonkey scripts directly, so this package injects a normal page script through `script-response-body`.
+- `list.avstatic.com` and `stat.avstatic.com` are MitM targets because the page script fetches segment and poster resources from those hosts.
+- GitHub raw URLs must be reachable by Quantumult X. If this repository is private, host these files somewhere QX can fetch directly.
+
+## Yaohuo Quantumult X Watcher
 
 Quantumult X script for saving your own `yaohuo.me` cookie and sending a local notification when watched pages contain bounty-related keywords.
 
 This repo intentionally does not include automatic posting, reward claiming, or other automated actions against the site. It only stores your own cookie locally and reminds you to review matching pages manually.
 
-## Files
+### Yaohuo Files
 
 - `qx-snippet.conf`: Quantumult X rewrite and scheduled task snippet.
 - `yaohuo_qx.js`: Saves the `yaohuo.me` Cookie from logged-in requests and checks configured pages for keywords.
 
-## Setup
+### Yaohuo Setup
 
 1. Add the contents of `qx-snippet.conf` to Quantumult X.
 2. The snippet references `yaohuo_qx.js` by remote GitHub raw URL, so you do not need to add the script file locally.
@@ -24,7 +62,7 @@ Remote script URL:
 https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/yaohuo_qx.js
 ```
 
-## Notes
+### Yaohuo Notes
 
 - Cookies are stored in Quantumult X persistent storage on your device.
 - GitHub raw URLs must be reachable by Quantumult X. If this repository is private, direct raw loading may fail unless you make the repo public or host the script somewhere QX can access.

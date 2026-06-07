@@ -23,10 +23,15 @@ assert.strictEqual(headers["Access-Control-Allow-Methods"], "GET, HEAD, OPTIONS"
 assert.strictEqual(headers["Access-Control-Allow-Headers"], "*");
 assert.strictEqual(headers["Content-Type"], "video/mp2t");
 
+const loginCandidates = [
+  { textContent: "已有账号，登录", offsetParent: {}, disabled: false },
+];
+assert.strictEqual(pageUtils.pickExistingAccountElement(loginCandidates), null, "does not click login-modal button");
+
 const candidates = [
   { textContent: "下载MP4", offsetParent: {}, disabled: false },
   { textContent: "注册账号", offsetParent: {}, disabled: false },
-  { textContent: "已有账号", offsetParent: {}, disabled: false },
+  { textContent: "已有账号，直接播放", offsetParent: {}, disabled: false },
 ];
 assert.strictEqual(pageUtils.pickExistingAccountElement(candidates), candidates[2], "picks existing-account button");
 
@@ -35,5 +40,9 @@ assert.strictEqual(pageUtils.pickExistingAccountElement([hidden]), null, "ignore
 
 const traditionalChinese = { textContent: "已有帳號，直接播放", offsetParent: {}, disabled: false };
 assert.strictEqual(pageUtils.pickExistingAccountElement([traditionalChinese]), traditionalChinese, "supports traditional Chinese account wording");
+
+const safeCookie = pageUtils.buildSafeCookie("CHfVnsdmCIzAl3P7", new Date("2026-06-08T00:00:00Z"));
+assert(safeCookie.startsWith("_safe=CHfVnsdmCIzAl3P7; expires="), "builds _safe cookie");
+assert(safeCookie.endsWith("; path=/"), "safe cookie is scoped to root path");
 
 console.log("avjb qx static tests passed");

@@ -719,10 +719,11 @@
   function isExistingAccountText(text) {
     const normalized = normalizeText(text);
     if (!normalized) return false;
-    if (/(已有|已有账号|已有帳號|已有帐号|老用户|老會員|老会员|登录|登入)/.test(normalized) && /(账号|帳號|帐号|账户|帳戶|会员|會員|播放|观看|觀看|进入|進入|登录|登入)/.test(normalized)) {
+    if (/(登录|登入|登錄|login)/i.test(normalized)) return false;
+    if (/(已有|已有账号|已有帳號|已有帐号|老用户|老會員|老会员)/.test(normalized) && /(账号|帳號|帐号|账户|帳戶|会员|會員|播放|观看|觀看|进入|進入)/.test(normalized)) {
       return true;
     }
-    return /已有(?:账号|帳號|帐号|账户|帳戶)/.test(normalized);
+    return /已有(?:账号|帳號|帐号|账户|帳戶)(?:直接)?(?:播放|观看|觀看|进入|進入)/.test(normalized);
   }
 
   function pickExistingAccountElement(candidates) {
@@ -747,9 +748,33 @@
     return true;
   }
 
+  function getCookieValue(name) {
+    const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = String(document.cookie || "").match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  function buildSafeCookie(safeid) {
+    const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    return `_safe=${String(safeid || "")}; expires=${expiresAt.toGMTString()}; path=/`;
+  }
+
+  function ensureSafeCookieAndReload() {
+    const safeid = window.safeid || Array.from(document.querySelectorAll("script"))
+      .map((script) => script.textContent || "")
+      .map((text) => text.match(/safeid\s*=\s*['"]([^'"]+)['"]/)?.[1])
+      .find(Boolean);
+    if (!safeid || getCookieValue("_safe") === String(safeid)) return false;
+    document.cookie = buildSafeCookie(safeid);
+    log("set safe cookie and reload", { safeidLength: String(safeid).length });
+    setTimeout(() => location.reload(), 80);
+    return true;
+  }
+
   function ensureUi() {
     installStyles();
     cleanupAds();
+    if (ensureSafeCookieAndReload()) return;
     clickExistingAccountIfPresent();
     if (parseVideoFromPath(location.pathname)) {
       ensureDownloadMenu();

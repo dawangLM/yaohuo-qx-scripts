@@ -1,8 +1,11 @@
 const assert = require("assert");
+const fs = require("fs");
 
 const injector = require("./avjb_artplayer_qx.js");
 const cors = require("./avjb_cors_headers_qx.js");
 const pageUtils = require("./avjb_page_utils.js");
+
+assert(injector.DEFAULT_PAGE_SCRIPT_URL.includes("cdn.jsdelivr.net/gh/"), "default page script uses browser-executable CDN");
 
 const html = "<!doctype html><html><head><title>x</title></head><body>ok</body></html>";
 const injected = injector.injectIntoHtml(html, "https://example.com/avjb_artplayer_page.js");
@@ -49,5 +52,9 @@ assert.strictEqual(pageUtils.pickExistingAccountElement([traditionalChinese]), t
 const safeCookie = pageUtils.buildSafeCookie("CHfVnsdmCIzAl3P7", new Date("2026-06-08T00:00:00Z"));
 assert(safeCookie.startsWith("_safe=CHfVnsdmCIzAl3P7; expires="), "builds _safe cookie");
 assert(safeCookie.endsWith("; path=/"), "safe cookie is scoped to root path");
+
+const pageScript = fs.readFileSync("./avjb_artplayer_page.js", "utf8");
+assert(!pageScript.includes("unpkg.com"), "page script does not depend on unpkg");
+assert(pageScript.includes("cdn.jsdelivr.net/npm/hls.js"), "page script loads hls.js from jsDelivr");
 
 console.log("avjb qx static tests passed");

@@ -22,9 +22,9 @@
     lastIndexStoragePrefix: "avjb_last_index_",
     downloadMenuSelector: "li.sort.download",
     libs: [
-      "https://unpkg.com/hls.js@1.5.18/dist/hls.min.js",
-      "https://unpkg.com/artplayer@5.3.0/dist/artplayer.js",
-      "https://unpkg.com/mux.js@6.3.0/dist/mux.min.js",
+      "https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js",
+      "https://cdn.jsdelivr.net/npm/artplayer@5.3.0/dist/artplayer.js",
+      "https://cdn.jsdelivr.net/npm/mux.js@6.3.0/dist/mux.min.js",
     ],
   };
 

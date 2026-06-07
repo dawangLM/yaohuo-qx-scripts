@@ -2,6 +2,7 @@ const assert = require("assert");
 
 const injector = require("./avjb_artplayer_qx.js");
 const cors = require("./avjb_cors_headers_qx.js");
+const pageUtils = require("./avjb_page_utils.js");
 
 const html = "<!doctype html><html><head><title>x</title></head><body>ok</body></html>";
 const injected = injector.injectIntoHtml(html, "https://example.com/avjb_artplayer_page.js");
@@ -21,5 +22,18 @@ assert.strictEqual(headers["Access-Control-Allow-Origin"], "*");
 assert.strictEqual(headers["Access-Control-Allow-Methods"], "GET, HEAD, OPTIONS");
 assert.strictEqual(headers["Access-Control-Allow-Headers"], "*");
 assert.strictEqual(headers["Content-Type"], "video/mp2t");
+
+const candidates = [
+  { textContent: "下载MP4", offsetParent: {}, disabled: false },
+  { textContent: "注册账号", offsetParent: {}, disabled: false },
+  { textContent: "已有账号", offsetParent: {}, disabled: false },
+];
+assert.strictEqual(pageUtils.pickExistingAccountElement(candidates), candidates[2], "picks existing-account button");
+
+const hidden = { textContent: "已有账号", offsetParent: null, disabled: false };
+assert.strictEqual(pageUtils.pickExistingAccountElement([hidden]), null, "ignores hidden elements");
+
+const traditionalChinese = { textContent: "已有帳號，直接播放", offsetParent: {}, disabled: false };
+assert.strictEqual(pageUtils.pickExistingAccountElement([traditionalChinese]), traditionalChinese, "supports traditional Chinese account wording");
 
 console.log("avjb qx static tests passed");

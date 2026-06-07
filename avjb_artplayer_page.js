@@ -712,9 +712,45 @@
     document.querySelectorAll(".top-ad,.bottom-adv,.sponsor,.ad-item,.spot,a[title='Visit our sponsor'],iframe[src*='xlivrdr.com'],script[src*='cdn.timka.cc']").forEach((node) => node.remove());
   }
 
+  function normalizeText(value) {
+    return String(value || "").replace(/\s+/g, "").trim();
+  }
+
+  function isExistingAccountText(text) {
+    const normalized = normalizeText(text);
+    if (!normalized) return false;
+    if (/(已有|已有账号|已有帳號|已有帐号|老用户|老會員|老会员|登录|登入)/.test(normalized) && /(账号|帳號|帐号|账户|帳戶|会员|會員|播放|观看|觀看|进入|進入|登录|登入)/.test(normalized)) {
+      return true;
+    }
+    return /已有(?:账号|帳號|帐号|账户|帳戶)/.test(normalized);
+  }
+
+  function pickExistingAccountElement(candidates) {
+    for (const element of Array.from(candidates || [])) {
+      if (!element || element.disabled || element.offsetParent === null) continue;
+      const text = element.textContent || element.innerText || element.value || element.getAttribute("title") || element.getAttribute("aria-label") || "";
+      if (isExistingAccountText(text)) return element;
+    }
+    return null;
+  }
+
+  function clickExistingAccountIfPresent() {
+    const candidates = document.querySelectorAll("a,button,input[type='button'],input[type='submit'],div[role='button'],span[role='button']");
+    const target = pickExistingAccountElement(candidates);
+    if (!target || target.dataset.avjbQxClickedExistingAccount === "1") return false;
+    target.dataset.avjbQxClickedExistingAccount = "1";
+    log("click existing-account entry", {
+      text: normalizeText(target.textContent || target.value || target.getAttribute("title") || target.getAttribute("aria-label") || ""),
+    });
+    target.click();
+    setTimeout(() => bootstrapPlayer(true), 600);
+    return true;
+  }
+
   function ensureUi() {
     installStyles();
     cleanupAds();
+    clickExistingAccountIfPresent();
     if (parseVideoFromPath(location.pathname)) {
       ensureDownloadMenu();
       bootstrapPlayer(false);

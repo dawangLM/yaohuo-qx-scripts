@@ -1,5 +1,5 @@
+const HOST = "yaohuo.me";
 const COOKIE_KEY = "yaohuo_cookie";
-const cookie = $persistentStore.read(COOKIE_KEY);
 
 const watchUrls = [
   "https://yaohuo.me/",
@@ -14,12 +14,19 @@ const keywords = [
   "无门槛",
 ];
 
-if (!cookie) {
-  $notify("妖火悬赏提醒", "未获取 CK", "先用 Safari 或内置浏览器登录 yaohuo.me");
-  $done();
+function saveCookieFromRequest() {
+  const headers = $request.headers || {};
+  const cookie = headers.Cookie || headers.cookie;
+
+  if (cookie && $request.url.includes(HOST)) {
+    $persistentStore.write(cookie, COOKIE_KEY);
+    $notify("妖火 CK 已更新", "", "Cookie 已保存到本机 Quantumult X");
+  }
+
+  $done({});
 }
 
-function fetchPage(url) {
+function fetchPage(url, cookie) {
   return new Promise((resolve) => {
     $task.fetch({
       url,
@@ -35,11 +42,19 @@ function fetchPage(url) {
   });
 }
 
-(async () => {
+async function watchKeywords() {
+  const cookie = $persistentStore.read(COOKIE_KEY);
+
+  if (!cookie) {
+    $notify("妖火悬赏提醒", "未获取 CK", "先用 Safari 或内置浏览器登录 yaohuo.me");
+    $done();
+    return;
+  }
+
   const hits = [];
 
   for (const url of watchUrls) {
-    const result = await fetchPage(url);
+    const result = await fetchPage(url, cookie);
     if (result.error) {
       continue;
     }
@@ -55,4 +70,10 @@ function fetchPage(url) {
   }
 
   $done();
-})();
+}
+
+if (typeof $request !== "undefined" && $request) {
+  saveCookieFromRequest();
+} else {
+  watchKeywords();
+}

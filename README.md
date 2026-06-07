@@ -13,9 +13,10 @@ This repo intentionally does not include automatic posting, reward claiming, or 
 
 1. Add the contents of `qx-snippet.conf` to Quantumult X.
 2. Put `yaohuo_qx.js` somewhere Quantumult X can load.
-3. Enable rewrite and MitM for `yaohuo.me` if your setup requires it.
-4. Log in to `https://yaohuo.me/` and open any page once. The script will save the Cookie locally.
-5. Edit `watchUrls` in `yaohuo_qx.js` to include the real bounty/list pages you want to monitor.
+3. Enable rewrite and MitM, then trust the Quantumult X CA certificate on your device.
+4. Make sure `yaohuo.me` is included in `[mitm] hostname`. The provided snippet already includes it.
+5. Log in to `https://yaohuo.me/` and open any page once. The script will save the Cookie locally.
+6. Edit `watchUrls` in `yaohuo_qx.js` to include the real bounty/list pages you want to monitor.
 
 ## Notes
 

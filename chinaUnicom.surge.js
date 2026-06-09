@@ -1,12 +1,12 @@
 /**
- * 中国联通 Surge 版 v1.2.5-port
+ * 中国联通 Surge 版 v1.2.6-port
  * - HTTP request 模式：抓取 token_online/appId 保存为 chinaUnicomCookie
  * - Cron/Panel 模式：执行登录校验、资产查询、首页签到、签到区任务、月签有礼、天天领现金、通通乡村、权益超市、云盘/安全管家/沃云手机等任务链路。
  * - 高复杂模块已按 Python 链路分批接入 Surge；个别接口若活动侧变更，会在日志输出具体失败原因。
  */
 
 const $ = new Env('中国联通');
-const SCRIPT_VERSION = 'v1.2.5';
+const SCRIPT_VERSION = 'v1.2.6';
 const UA = 'Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}';
 const H5_UA = 'Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.146 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0};devicetype{deviceBrand:Xiaomi,deviceModel:MI 8}';
 const ENABLE_SIGN = readBool('UNICOM_ENABLE_SIGN', true);
@@ -434,7 +434,8 @@ class UserService {
     }
     if (!token) {
       if (String(lastStatus) === '200') {
-        this.log(`通通乡村: woauth未取到token[200]，页面:${woauthPageHint(lastBody)}`);
+        // 官方 woauth 链路有时最终落到通通乡村 H5 页面，页面内不再暴露 token，
+        // 但服务端 Cookie/会话已写入；后续初始化可成功，不能按错误输出误导日志。
         return true;
       }
       this.log(`通通乡村: woauth未取到token[${lastStatus}]`);
@@ -484,7 +485,7 @@ class UserService {
   async ttxcDoJumpTasks(tasks) { for (const t of tasks) if (t.taskType === 'GAME' && t.taskStatus === 'UNDO' && t.jumpUrl) { await this.ttxcDoTask(t); await wait(1000); } }
   async ttxcDoTask(t) { const id = t.taskCode || t.taskId || t.id; const j = await this.ttxcPost('/client/v1/task/do', {taskId:id}); this.log(j.code === 0 ? `通通乡村: 已执行[${t.taskTitle || id}]` : `通通乡村: 执行[${t.taskTitle || id}]失败[${j.code ?? '?'}]: ${j.msg || ''}`); }
   async ttxcFinishTask(t) { const id = t.taskCode || t.taskId || t.id; const j = await this.ttxcPost('/client/v1/task/finish', {taskId:id}); this.log(j.code === 0 ? `通通乡村: 领取[${t.taskTitle || id}]成功 +${t.carbonEnergyAmount || 0}g` : `通通乡村: 领取[${t.taskTitle || id}]失败[${j.code ?? '?'}]: ${j.msg || ''}`); }
-  async ttxcDoGarbageTask(tasks) { const t = tasks.find(x => x.taskType === 'GAME' && x.taskStatus === 'UNDO' && String(x.taskTitle || '').includes('垃圾分类')); if (!t) return; const s = await this.ttxcPost('/user/v1/start', {}); const answerNo = s.data?.answerNo; if (!answerNo) return this.log('通通乡村: 垃圾分类开始失败'); await wait(3000); const j = await this.ttxcPost('/user/v1/finish', {answerNo}); this.log(j.code === 0 ? '通通乡村: 垃圾分类已通关' : `通通乡村: 垃圾分类通关失败[${j.code ?? '?'}]: ${j.msg || ''}`); }
+  async ttxcDoGarbageTask(tasks) { const t = tasks.find(x => x.taskType === 'GAME' && x.taskStatus === 'UNDO' && String(x.taskTitle || '').includes('垃圾分类')); if (!t) return; this.log('通通乡村: 垃圾分类需真实答题流程，已跳过避免用户答题异常'); }
 
   marketHeaders(token, h5=false) { return {Authorization:`Bearer ${String(token || '').replace(/^Bearer\s+/i,'')}`, 'User-Agent':h5 ? H5_UA : UA, Origin:'https://contact.bol.wo.cn', Referer:'https://contact.bol.wo.cn/', 'Content-Type':'application/json', Accept:'*/*', 'X-Requested-With':'com.sinovatech.unicom.ui'}; }
   async marketTask(query=false) {
@@ -513,9 +514,10 @@ class UserService {
     const entry=await this.openPlatLineNew('https://h5forphone.wostore.cn/cloudPhone/dialogCloudPhone.html?channel_id=ST-Zujian001-gs&cp_id=91002997');
     if(!entry?.ticket) return this.log(`沃云手机: 获取入口Ticket失败${entry?.location ? ' loc='+entry.location.slice(0,120) : ''}`);
     const tok=await wostoreLogin(entry.ticket);
-    if(!tok?.user_token) return this.log(`沃云手机: 登录失败: ${tok?.message || tok?.msg || responseSummary(tok)}`);
-    const j=parseJson((await this.request('post','https://uphone.wostore.cn/h5api/activity-service/lottery',{json:{activityCode:'HD2026033000125'},headers:{'X-USR-TOKEN':tok.user_token,'Content-Type':'application/json',Origin:'https://uphone.wostore.cn',Referer:'https://uphone.wostore.cn/cloudphone/'}}))?.body)||{};
-    this.log(`沃云手机: 抽奖: ${j.data?.prizeName || j.msg || responseSummary(j)}`, true);
+    if(!tok?.access_token) return this.log(`沃云手机: 官方登录失败: ${tok?.message || tok?.msg || responseSummary(tok)}`);
+    this.log(`沃云手机: 官方cloudphone登录成功${tok.userName ? '，用户 '+mask(tok.userName) : ''}`, true);
+    if (tok.instanceChecked) this.log(`沃云手机: 实例状态: ${tok.instanceMsg || '已查询'}`, true);
+    else this.log(`沃云手机: 实例状态查询失败: ${tok.instanceMsg || '接口未返回'}`);
   }
   async aitingTask(query=false) { this.log('==== 联通爱听 ===='); const appIds=['edop_unicom_a2','edop_unicom_aiting','edop_unicom_a']; for (const appId of appIds) { const ticket=await this.getTicketByNative(appId); if(ticket) { this.log(`联通爱听: 已获取ticket appId=${appId}，活动接口待继续接入`, true); return; } await wait(300); } this.log('联通爱听: 获取ticket失败，候选 appId 均不可用'); }
   async regionalTask(query=false) { this.log('==== 区域专区 ===='); const ps=(this.city_info||[]).map(x=>x.proName||'').filter(Boolean).join('/'); this.log(`区域专区: 当前省份 ${ps || '未识别'}`); }
@@ -601,26 +603,20 @@ async function cloudDispatcherToken(ticket){
 }
 async function wostoreLogin(ticket){
   const common={cpId:'91002997',channelId:'ST-Zujian001-gs',ticket,env:'prod'};
-  const headers={Origin:'https://h5forphone.wostore.cn',Referer:'https://h5forphone.wostore.cn/cloudPhone/dialogCloudPhone.html?channel_id=ST-Zujian001-gs&cp_id=91002997','Content-Type':'application/json'};
-  await http('post','https://member.zlhz.wostore.cn/wcy_member/yunPhone/preCheck',{json:common,headers}).catch(()=>null);
-  const s1=parseJson((await http('post','https://member.zlhz.wostore.cn/wcy_member/yunPhone/h5Awake/businessHall',{json:{...common,transId:'',qkActId:''},headers}))?.body)||{};
+  const h5Headers={Origin:'https://h5forphone.wostore.cn',Referer:'https://h5forphone.wostore.cn/cloudPhone/dialogCloudPhone.html?channel_id=ST-Zujian001-gs&cp_id=91002997','Content-Type':'application/json','User-Agent':H5_UA};
+  await http('post','https://member.zlhz.wostore.cn/wcy_member/yunPhone/preCheck',{json:common,headers:h5Headers}).catch(()=>null);
+  const s1=parseJson((await http('post','https://member.zlhz.wostore.cn/wcy_member/yunPhone/h5Awake/businessHall',{json:{...common,transId:'',qkActId:''},headers:h5Headers}))?.body)||{};
   const data=s1.data || {};
-  let first=data.token || (String(data.url||'').match(/[?&]token=([^&]+)/)||[,''])[1] || '';
-  if(!first) return {message:s1.msg || s1.message || responseSummary(s1)};
-  const code=decodeURIComponent(first);
-  const loginPayloads=[
-    {identityType:'cloudPhoneLogin',code,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'},
-    {identityType:'cloudPhoneLogin',code:first,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'},
-    {identityType:'cloudPhoneLogin',token:first,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'}
-  ];
-  let last={};
-  for (const payload of loginPayloads) {
-    const s2=parseJson((await http('post','https://uphone.wostore.cn/h5api/activity-service/user/login',{json:payload,headers:{Origin:'https://uphone.wostore.cn',Referer:'https://uphone.wostore.cn/cloudphone/','X-USR-TOKEN':first,'Content-Type':'application/json'}}))?.body)||{};
-    last=s2;
-    const userToken=s2.data?.user_token || s2.data?.userToken || s2.user_token || '';
-    if (userToken) return {firstToken:first,user_token:userToken};
-  }
-  return {firstToken:first,message:last.msg || last.message || responseSummary(last)};
+  const url=String(data.url || '');
+  const accessToken=data.token || (url.match(/[?&]token=([^&]+)/)||[,''])[1] || '';
+  if(!accessToken) return {message:s1.msg || s1.message || responseSummary(s1)};
+  const token=decodeURIComponent(accessToken);
+  const apiHeaders={Authorization:token,channelCode:'bucp-master',channel:'bucp-master',os:'H5',source:'4',deviceId:md5(token).slice(0,32),'User-Agent':H5_UA,Origin:'https://uphone.wo-adv.cn',Referer:`https://uphone.wo-adv.cn/cloudphone/?token=${encodeURIComponent(token)}&channelId=bucp-master`};
+  const user=parseJson((await http('get','https://uphone.wo-adv.cn/bucp/servers/system/user/getAppUserInfo',{headers:apiHeaders}))?.body)||{};
+  if (String(user.code || user.status) === '401') return {access_token:token,message:user.msg || user.message || responseSummary(user)};
+  const ins=parseJson((await http('get','https://uphone.wo-adv.cn/bucp/servers/order/trade/checkUserInstance?channelCode=bucp-master',{headers:apiHeaders}))?.body)||{};
+  const ok=/^(0|200|0000)$/.test(String(ins.code ?? ins.status ?? '')) || !!ins.data;
+  return {access_token:token,userName:user.data?.phone || user.data?.mobile || user.data?.userName || '', instanceChecked:ok, instanceMsg:ins.msg || ins.message || (ok ? '已查询' : responseSummary(ins))};
 }
 function uuidv4(){ return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);}); }
 function hmacSha256Bytes(keyBytes,msgBytes){ const block=64; let key=keyBytes.slice(); if(key.length>block) key=sha256Bytes(key); if(key.length<block) key=key.concat(new Array(block-key.length).fill(0)); const o=new Array(block), i=new Array(block); for(let k=0;k<block;k++){ o[k]=key[k]^0x5c; i[k]=key[k]^0x36; } return sha256Bytes(o.concat(sha256Bytes(i.concat(msgBytes)))); }

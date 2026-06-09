@@ -412,11 +412,30 @@ class UserService {
     return false;
   }
   async ttxcFinishWoauth(loginUrl) {
-    const r = await this.request('get', loginUrl, {headers:{Referer:'https://epay.10010.com/', 'User-Agent':H5_UA}});
-    const token = String(r?.body || '').match(/var token = "([^"]+)"/)?.[1];
-    if (!token) { this.log(`通通乡村: woauth未取到token[${r?.status || '?'}]`); return false; }
+    let token = extractWoauthToken(loginUrl);
+    let current = loginUrl;
+    let referer = 'https://epay.10010.com/';
+    let lastStatus = '?';
+    for (let i=0; !token && i<6; i++) {
+      const r = await this.request('get', current, {headers:{Referer:referer, 'User-Agent':H5_UA}, followRedirect:false});
+      lastStatus = r?.status || '?';
+      const loc = r?.headers?.Location || r?.headers?.location || '';
+      token = extractWoauthToken(current) || extractWoauthToken(loc) || extractWoauthToken(r?.body || '');
+      if (token) break;
+      if (!loc) break;
+      referer = current;
+      current = absolutize(current, loc);
+    }
+    if (!token) {
+      if (String(lastStatus) === '200') {
+        this.log('通通乡村: woauth未取到token[200]，尝试复查初始化');
+        return true;
+      }
+      this.log(`通通乡村: woauth未取到token[${lastStatus}]`);
+      return false;
+    }
     let next = `https://epay.10010.com/woauth2/after-collected-device-digest?deviceDigestTraceId=&deviceDigestTokenId=&token=${encodeURIComponent(token)}&source=app_sjyyt`;
-    let referer = loginUrl;
+    referer = current;
     for (let i=0;i<6;i++) {
       const rr = await this.request('get', next, {headers:{Referer:referer, 'User-Agent':H5_UA}, followRedirect:false});
       const loc = rr?.headers?.Location || rr?.headers?.location || '';
@@ -500,6 +519,20 @@ function serializeCookies(obj){ return Object.entries(obj || {}).filter(([k,v])=
 function responseSummary(j){ if(!j || typeof j !== 'object') return String(j || '接口返回异常'); return j.message || j.msg || j.desc || j.resultMsg || j.rsp_desc || '接口返回异常'; }
 function dateYmd(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function absolutize(base, next){ if(/^https?:\/\//i.test(next)) return next; try{ const u=new URL(base); return next.startsWith('/') ? `${u.protocol}//${u.host}${next}` : `${u.protocol}//${u.host}${u.pathname.split('/').slice(0,-1).join('/')}/${next}`; }catch{return next;} }
+function extractWoauthToken(s){
+  s = String(s || '');
+  const patterns = [
+    /var\s+token\s*=\s*['"]([^'"]+)['"]/i,
+    /[?&]token=([^&#\s]+)/i,
+    /['"]token['"]\s*[:=]\s*['"]([^'"]+)['"]/i,
+    /token\s*[:=]\s*['"]([^'"]+)['"]/i
+  ];
+  for (const re of patterns) {
+    const m = s.match(re);
+    if (m?.[1]) { try { return decodeURIComponent(m[1]); } catch { return m[1]; } }
+  }
+  return '';
+}
 function parseJwt(token){ try{ const p=String(token||'').split('.')[1]||''; return JSON.parse(base64UrlDecode(p)||'{}'); }catch{return {};} }
 function base64UrlDecode(s){ s=String(s||'').replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; if(typeof atob!=='undefined') return decodeURIComponent(escape(atob(s))); if(typeof Buffer!=='undefined') return Buffer.from(s,'base64').toString('utf8'); return ''; }
 function bytesToBase64(bytes){ let bin=''; for(const b of bytes) bin+=String.fromCharCode(b); if(typeof btoa!=='undefined') return btoa(bin); if(typeof Buffer!=='undefined') return Buffer.from(bin,'binary').toString('base64'); return ''; }

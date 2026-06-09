@@ -35,13 +35,13 @@ async function main() {
     results.push(await runAccount(accounts[i], i, allUserIds));
     await wait(1500);
   }
-  let totalEarned = 0, totalDragonGold = 0;
+  let totalEarned = 0, totalDragonGold = 0, ckInvalidCount = 0;
   const lines = [];
   for (const r of results) {
     const phone = maskPhone(r.phone) || '未登录';
     totalEarned += r.points_earned || 0;
     totalDragonGold += r.dragon_gold || 0;
-    if (r.ck_invalid) lines.push(`❌ ${phone}: CK失效了`);
+    if (r.ck_invalid) { lines.push(`❌ ${phone}: CK失效了`); ckInvalidCount++; }
     else if (!r.success) lines.push(`❌ ${phone}: ${r.fail_reason || '登录失败'}`);
     else {
       lines.push(`✅ ${phone}: 积分+${r.points_earned || 0}`);
@@ -52,7 +52,11 @@ async function main() {
     }
   }
   lines.push(`📱 总账号: ${results.length} | 💰 总积分+${totalEarned}` + (ENABLE_DRAGON_BOAT ? ` | 端午金币${totalDragonGold}` : ''));
-  finish(lines.join('\n'));
+  const summary = lines.join('\n');
+  if (ckInvalidCount > 0) {
+    $.msg('顺丰速运', 'CK 失效提醒', `共${ckInvalidCount}个账号 CK 已失效，请打开顺丰速运小程序重新触发抓取`);
+  }
+  finish(summary);
 }
 
 function captureCookie() {
@@ -73,10 +77,8 @@ function captureCookie() {
   const isNewOrChanged = idx < 0 || list[idx] !== ck;
   if (idx >= 0) list[idx] = ck; else list.push(ck);
   $.setdata(list.join('&'), 'sfsyUrl');
-  const notifyKey = `sfsy_cookie_notified_${uid || phone || md5(ck)}`;
-  if (isNewOrChanged && $.getdata(notifyKey) !== '1') {
-    $.setdata('1', notifyKey);
-    $.msg('顺丰速运', 'Cookie 抓取成功', maskPhone(phone) || uid || '');
+  if (isNewOrChanged) {
+    $.msg('顺丰速运', 'Cookie 抓取/更新成功', maskPhone(phone) || uid || '已更新');
   }
   $.done({});
 }

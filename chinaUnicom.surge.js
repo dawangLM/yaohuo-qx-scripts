@@ -20,7 +20,11 @@ const TTXC_APP_BASE = 'https://epay.10010.com/cu-ca-app-front';
 const TTXC_CHANNEL = '225';
 const TTXC_REFERER = 'https://epay.10010.com/cu-ca-game-web/index.html?channel=qdqp';
 
-!(async () => {
+setTimeout(() => {
+  main().catch(e => finish(`运行异常: ${formatError(e)}`));
+}, 0);
+
+async function main() {
   if (typeof $request !== 'undefined') return captureToken();
   const raw = $.getdata('chinaUnicomCookie') || '';
   if (!raw) return finish('未找到 chinaUnicomCookie，请先打开中国联通 APP 触发抓取');
@@ -37,8 +41,8 @@ const TTXC_REFERER = 'https://epay.10010.com/cu-ca-game-web/index.html?channel=q
     notify.push(...u.notifyLogs);
     await wait(1500);
   }
-  finish(notify.length ? notify.join('\n') : '执行完成，暂无通知内容');
-})().catch(e => finish(`运行异常: ${e.stack || e}`));
+  finish(notify.length ? notify.map(oneLine).join('\n') : '执行完成，暂无通知内容');
+}
 
 function captureToken() {
   const url = $request.url || '';
@@ -53,9 +57,14 @@ function captureToken() {
   const old = $.getdata('chinaUnicomCookie') || '';
   const list = old ? old.split(/[&\n]/).filter(Boolean) : [];
   const idx = list.findIndex(x => (mobile && x.includes(mobile)) || x.split('#')[0] === token);
+  const isNewOrChanged = idx < 0 || list[idx] !== item;
   if (idx >= 0) list[idx] = item; else list.push(item);
   $.setdata(list.join('&'), 'chinaUnicomCookie');
-  $.msg('中国联通', 'Token 抓取成功', mask(mobile || token));
+  const notifyKey = `china_unicom_token_notified_${mobile || token}`;
+  if (isNewOrChanged && $.getdata(notifyKey) !== '1') {
+    $.setdata('1', notifyKey);
+    $.msg('中国联通', 'Token 抓取成功', mask(mobile || token));
+  }
   $.done({});
 }
 
@@ -254,6 +263,8 @@ function pickParam(s,k){ try { const m = String(s||'').match(new RegExp(`(?:[?&#
 function pickCookie(c,k){ const m = String(c||'').match(new RegExp(`${k}=([^;]+)`)); return m ? m[1] : ''; }
 function readBool(k,d){ const v=$.getdata(k); return v==null||v===''?d:!['0','false','False','FALSE'].includes(v); }
 function mask(s){ s=String(s||''); if(/^1\d{10}$/.test(s)) return s.slice(0,3)+'****'+s.slice(7); return s.length>12 ? s.slice(0,6)+'******'+s.slice(-6) : s; }
+function oneLine(s){ return String(s || '').replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim(); }
+function formatError(e){ return (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e); }
 function randomString(n, chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'){ let r=''; for(let i=0;i<n;i++) r+=chars[Math.floor(Math.random()*chars.length)]; return r; }
 function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
 function time(){ const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; }

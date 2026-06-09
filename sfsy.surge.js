@@ -86,8 +86,14 @@ async function runAccount(accountRaw, index, allUserIds) {
   const account = accountRaw.split('#')[0].trim();
   const http = new SFHttpClient(account, logger);
   const login = http.login();
-  if (!login.success) return {success:false, phone:'', index, points_earned:0, dragon_gold:0, dragon_prizes:[], member_day_prizes:[], ck_invalid:true, fail_reason:'CK失效了'};
-  logger.success(`【${maskPhone(login.phone)}】登录成功`);
+  if (!login.success) return {success:false, phone:'', index, points_earned:0, dragon_gold:0, dragon_prizes:[], member_day_prizes:[], ck_invalid:true, fail_reason:'CK格式不完整，缺少手机号或用户ID'};
+  logger.success(`【${maskPhone(login.phone)}】Cookie 解析成功`);
+  const ckValid = await http.validateLogin();
+  if (!ckValid) {
+    logger.error(`CK 预检失败: ${http.ckInvalidMessage || '登录态已失效，请重新抓取 Cookie'}`);
+    return {success:false, phone:login.phone, index, points_earned:0, dragon_gold:0, dragon_prizes:[], member_day_prizes:[], ck_invalid:true, fail_reason:http.ckInvalidMessage || 'CK失效了，请重新抓取'};
+  }
+  logger.success(`【${maskPhone(login.phone)}】登录验证通过`);
   const result = {success:true, phone:login.phone, index, points_before:0, points_after:0, points_earned:0, member_day_prizes:[], dragon_gold:0, dragon_prizes:[], ck_invalid:false};
   if (ENABLE_DAILY_TASK) {
     const daily = new DailyTaskExecutor(http, logger, login.userId);
@@ -125,6 +131,12 @@ class SFHttpClient {
     const phone = (this.cookie.match(/_login_mobile_=([^;]+)/) || [,''])[1];
     const userId = (this.cookie.match(/_login_user_id_=([^;]+)/) || [,''])[1];
     return {success: !!phone, phone, userId};
+  }
+  async validateLogin() {
+    const r = await this.post(`${BASE}/mcs-mimp/commonPost/~memberNonactivity~integralTaskStrategyService~queryPointTaskAndSignFromES`, {channelType:'1', deviceId:'00000000-0000-0000-0000-000000000000'});
+    if (!r) { this.ckInvalid = true; this.ckInvalidMessage = '网络请求失败，无法验证登录态'; return false; }
+    if (this.ckInvalid) return false;
+    return true;
   }
   signHeaders() { const timestamp = String(Date.now()); return {syscode: SYS_CODE, timestamp, signature: md5(`token=${TOKEN}&timestamp=${timestamp}&sysCode=${SYS_CODE}`)}; }
   async post(url, data = {}, extra = {}) {

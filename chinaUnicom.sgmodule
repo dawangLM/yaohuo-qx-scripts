@@ -1,5 +1,5 @@
 #!name=中国联通自动任务
-#!desc=Surge 模块：抓取 token_online/appId，执行中国联通任务（资产、首页签到、天天领现金、通通乡村、权益超市、云盘/安全管家等；不稳定活动默认关闭）。安装后先打开中国联通 APP 登录并触发首页。
+#!desc=Surge 模块：抓取 token_online/appId，执行中国联通任务（资产、首页签到、联通祝福、天天领现金、通通乡村、权益超市、阅读、爱听、云盘/安全管家/沃云手机、区域等；功能默认全开并输出诊断）。安装后先打开中国联通 APP 登录并触发首页。
 #!author=Reasonix port
 
 [MITM]
@@ -7,7 +7,7 @@ hostname = %APPEND% m.client.10010.com, activity.10010.com, act.10010.com, epay.
 
 [Script]
 # 抓取中国联通登录 Token
-中国联通Token = type=http-request,pattern=^https:\/\/m\.client\.10010\.com\/mobileService\/(onLine\.htm|.+),script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/f48477ec162abc35843dfd7147dbbd024071eed9/chinaUnicom.surge.js,requires-body=0,timeout=10
+中国联通Token = type=http-request,pattern=^https:\/\/m\.client\.10010\.com\/mobileService\/(onLine\.htm|.+),script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/7591f7be43c8cf1ae1d2de37d92654fbdbd97b00/chinaUnicom.surge.js,requires-body=0,timeout=10
 
 # 定时任务：每天 07:00 和 20:00
-中国联通自动任务 = type=cron,cronexp="0 7,20 * * *",wake-system=1,script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/f48477ec162abc35843dfd7147dbbd024071eed9/chinaUnicom.surge.js,timeout=900
+中国联通自动任务 = type=cron,cronexp="0 7,20 * * *",wake-system=1,script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/7591f7be43c8cf1ae1d2de37d92654fbdbd97b00/chinaUnicom.surge.js,timeout=900

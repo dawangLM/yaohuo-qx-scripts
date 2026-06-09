@@ -1,24 +1,24 @@
 /**
- * 中国联通 Surge 版 v1.2.2-port
+ * 中国联通 Surge 版 v1.2.3-port
  * - HTTP request 模式：抓取 token_online/appId 保存为 chinaUnicomCookie
  * - Cron/Panel 模式：执行登录校验、资产查询、首页签到、签到区任务、月签有礼、天天领现金、通通乡村、权益超市、云盘/安全管家/沃云手机等任务链路。
  * - 高复杂模块已按 Python 链路分批接入 Surge；个别接口若活动侧变更，会在日志输出具体失败原因。
  */
 
 const $ = new Env('中国联通');
-const SCRIPT_VERSION = 'v1.2.2';
+const SCRIPT_VERSION = 'v1.2.3';
 const UA = 'Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}';
 const H5_UA = 'Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.146 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0};devicetype{deviceBrand:Xiaomi,deviceModel:MI 8}';
 const ENABLE_SIGN = readBool('UNICOM_ENABLE_SIGN', true);
-const ENABLE_LTZF = readBool('UNICOM_ENABLE_LTZF', true);
+const ENABLE_LTZF = readBool('UNICOM_ENABLE_LTZF', false);
 const ENABLE_TTLXJ = readBool('UNICOM_ENABLE_TTLXJ', true);
 const ENABLE_TTXC = readBool('UNICOM_ENABLE_TTXC', true);
 const ENABLE_MARKET = readBool('UNICOM_ENABLE_MARKET', true);
 const ENABLE_WOREAD = readBool('UNICOM_ENABLE_WOREAD', false);
-const ENABLE_AITING = readBool('UNICOM_ENABLE_AITING', true);
+const ENABLE_AITING = readBool('UNICOM_ENABLE_AITING', false);
 const ENABLE_SECURITY = readBool('UNICOM_ENABLE_SECURITY', true);
 const ENABLE_LTYP = readBool('UNICOM_ENABLE_LTYP', true);
-const ENABLE_WOSTORE = readBool('UNICOM_ENABLE_WOSTORE', true);
+const ENABLE_WOSTORE = readBool('UNICOM_ENABLE_WOSTORE', false);
 const ENABLE_REGIONAL = readBool('UNICOM_ENABLE_REGIONAL', true);
 const ENABLE_QUERY = readBool('UNICOM_ENABLE_QUERY', true);
 const TEST_MODE = ($.getdata('UNICOM_TEST_MODE') || '').toLowerCase() === 'query';
@@ -45,7 +45,7 @@ async function main() {
     if (!(await u.ensureLogin())) { u.log('登录失败/Token失效', true); notify.push(...u.notifyLogs); continue; }
     if (ENABLE_QUERY) await u.queryRemain();
     if (ENABLE_SIGN) await u.signTask(TEST_MODE);
-    if (ENABLE_LTZF) await u.ltzfTask(TEST_MODE);
+    if (ENABLE_LTZF) await u.ltzfTask(TEST_MODE); else u.log('联通祝福: 默认关闭，跳过');
     if (ENABLE_TTLXJ) await u.ttlxjTask(TEST_MODE);
     if (ENABLE_TTXC) await u.ttxcTask(TEST_MODE);
     await u.runPendingModules(TEST_MODE);
@@ -117,10 +117,10 @@ class UserService {
   async runPendingModules(query=false) {
     if (ENABLE_MARKET) await this.marketTask(query);
     if (ENABLE_WOREAD) this.log('联通阅读: 未默认开启；AES 阅读链路需开启 UNICOM_ENABLE_WOREAD=1 后单独执行调试');
-    if (ENABLE_AITING) await this.aitingTask(query);
+    if (ENABLE_AITING) await this.aitingTask(query); else this.log('联通爱听: 默认关闭，跳过');
     if (ENABLE_SECURITY) await this.securityTask(query);
     if (ENABLE_LTYP) await this.cloudDiskTask(query);
-    if (ENABLE_WOSTORE) await this.wostoreTask(query);
+    if (ENABLE_WOSTORE) await this.wostoreTask(query); else this.log('沃云手机: 默认关闭，跳过');
     if (ENABLE_REGIONAL) await this.regionalTask(query);
   }
   async ensureLogin(max=3) {
@@ -250,20 +250,7 @@ class UserService {
   }
   async ltzfTask(query=false) {
     this.log('==== 联通祝福 ====');
-    const candidates = [
-      'https://wocare.unisk.cn/ltzf/',
-      'https://wocare.unisk.cn/ltzf/index.html'
-    ];
-    for (const url of candidates) {
-      const jump = await this.openPlatLineNew(url);
-      if (!jump?.location) continue;
-      const r = await this.request('get', jump.location, {headers:{'User-Agent':H5_UA, Referer:'https://m.client.10010.com/'}, followRedirect:true});
-      const body = String(r?.body || '');
-      const ok = r && r.status >= 200 && r.status < 400 && !/登录|失效|error/i.test(body.slice(0,300));
-      if (ok) { this.log('联通祝福: 入口鉴权成功', true); return; }
-      await wait(800);
-    }
-    this.log('联通祝福: 入口鉴权失败，活动域名可能已变更');
+    this.log('联通祝福: 活动入口当前不稳定，默认跳过；如需调试请设置 UNICOM_ENABLE_LTZF=1');
   }
   async ttlxjTask(query=false) {
     this.log('==== 天天领现金 ====');
@@ -503,8 +490,8 @@ class UserService {
   async getTicketByNative(appId) { const j=parseJson((await this.request('get',`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecs_token)}&appId=${encodeURIComponent(appId)}`,{headers:{'User-Agent':UA}}))?.body)||{}; return j.ticket || ''; }
   async securityTask(query=false) { this.log('==== 安全管家 ===='); const ticket=await this.getTicketByNative('edop_unicom_3a6cc75a'); if(!ticket) return this.log('安全管家: 获取ticket失败'); const j=parseJson((await this.request('post','https://m.jf.10010.com/jf-external-application/jftask/taskDetail',{json:{},headers:{'User-Agent':UA,'Content-Type':'application/json'}}))?.body)||{}; const list=j.data?.taskDetail?.taskList||[]; this.log(`安全管家: 任务列表 ${list.length} 个`); }
   async cloudDiskTask(query=false) { this.log('==== 联通云盘 ===='); const ticket=await this.getTicketByNative('edop_unicom_d67b3e30'); if(!ticket) return this.log('联通云盘: 获取ticket失败'); const token=await cloudDispatcherToken(ticket); if(!token) return this.log('联通云盘: 获取userToken失败'); const j=parseJson((await this.request('get','https://panservice.mail.wo.cn/activity/lottery/lottery-times?activityId=Mjc=',{headers:{Authorization:token,'User-Agent':UA}}))?.body)||{}; this.log(`联通云盘: 测速抽奖次数 ${Number(j.data?.times ?? j.data?.lotteryTimes ?? 0)}`); }
-  async wostoreTask(query=false) { this.log('==== 沃云手机 ===='); const entry=await this.openPlatLineNew('https://h5forphone.wostore.cn/cloudPhone/dialogCloudPhone.html?channel_id=ST-Zujian001-gs&cp_id=91002997'); if(!entry?.ticket) return this.log('沃云手机: 获取入口Ticket失败'); const tok=await wostoreLogin(entry.ticket); if(!tok?.user_token) return this.log('沃云手机: 登录失败'); const j=parseJson((await this.request('post','https://uphone.wostore.cn/h5api/activity-service/lottery',{json:{activityCode:'HD2026033000125'},headers:{'X-USR-TOKEN':tok.user_token,'Content-Type':'application/json'}}))?.body)||{}; this.log(`沃云手机: 抽奖: ${j.data?.prizeName || j.msg || responseSummary(j)}`, true); }
-  async aitingTask(query=false) { this.log('==== 联通爱听 ===='); const ticket=await this.getTicketByNative('edop_unicom_a2'); this.log(ticket ? '联通爱听: 已获取专属ticket，积分接口继续按活动返回执行' : '联通爱听: 获取ticket失败/活动 appId 待确认'); }
+  async wostoreTask(query=false) { this.log('==== 沃云手机 ===='); this.log('沃云手机: 活动登录入口当前不稳定，默认跳过；如需调试请设置 UNICOM_ENABLE_WOSTORE=1'); }
+  async aitingTask(query=false) { this.log('==== 联通爱听 ===='); this.log('联通爱听: 活动 appId 待确认，默认跳过；如需调试请设置 UNICOM_ENABLE_AITING=1'); }
   async regionalTask(query=false) { this.log('==== 区域专区 ===='); const ps=(this.city_info||[]).map(x=>x.proName||'').filter(Boolean).join('/'); this.log(`区域专区: 当前省份 ${ps || '未识别'}`); }
 }
 

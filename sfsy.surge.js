@@ -45,10 +45,10 @@ async function main() {
     else if (!r.success) lines.push(`❌ ${phone}: ${r.fail_reason || '登录失败'}`);
     else {
       const parts = [`积分+${r.points_earned || 0}`];
-      if ((r.member_day_prizes || []).length) parts.push(`会员日: ${r.member_day_prizes.join(', ')}`);
+      if ((r.member_day_prizes || []).length) parts.push(`会员日:${oneLine(r.member_day_prizes.join(','))}`);
       if (ENABLE_DRAGON_BOAT) parts.push(`端午金币${r.dragon_gold || 0}`);
       const dp = filterDragonPrizes(r.dragon_prizes || []);
-      if (dp.length) parts.push(`端午奖品: ${dp.join(', ')}`);
+      if (dp.length) parts.push(`端午奖品:${oneLine(dp.join(','))}`);
       lines.push(`✅ ${phone}: ${parts.join(' | ')}`);
     }
   }
@@ -221,6 +221,7 @@ function readBool(k,d){ const v=$.getdata(k); return v==null||v===''?d:!['0','fa
 function safeDecode(s){ try { return decodeURIComponent(String(s || '')); } catch { return String(s || ''); } }
 function formatError(e){ return (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e); }
 function maskPhone(p){ return p && p.length>=7 ? p.slice(0,3)+'****'+p.slice(7) : (p||''); }
+function oneLine(s){ return String(s || '').replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim(); }
 function isLowValue(text){ if (!/[券红包]/.test(text)) return false; const ms = text.match(/(\d+(?:\.\d+)?)\s*元/g)||[]; return ms.some(x => parseFloat(x) < DRAGON_BOAT_LOW_VALUE_LIMIT); }
 function filterDragonPrizes(ps){ return ps.filter(p => !DRAGON_EXCLUDE.some(r=>r.test(p)) && !isLowValue(p)); }
 function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }

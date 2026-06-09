@@ -32,9 +32,13 @@ async function main() {
   $.log(`共 ${accounts.length} 个账号 | 日常:${ENABLE_DAILY_TASK} 会员日:${ENABLE_MEMBER_DAY} 端午:${ENABLE_DRAGON_BOAT}`);
   const results = [];
   for (let i = 0; i < accounts.length; i++) {
+    const refreshed = await tryRefreshCookie(accounts[i], i);
+    if (refreshed) accounts[i] = refreshed;
     results.push(await runAccount(accounts[i], i, allUserIds));
     await wait(1500);
   }
+  const newRaw = accounts.join('&');
+  if (newRaw !== raw) $.setdata(newRaw, 'sfsyUrl');
   let totalEarned = 0, totalDragonGold = 0, ckInvalidCount = 0;
   const lines = [];
   for (const r of results) {
@@ -124,6 +128,7 @@ class SFHttpClient {
     this.logger = logger;
     this.ckInvalid = false;
     this.ckInvalidMessage = '';
+    this.ckRefreshed = false;
     this.headers = {
       'Host': 'mcs-mimp-web.sf-express.com', 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.63 miniProgram/wxd4185d00bf7e08ac',
       'Accept': 'application/json, text/plain, */*', 'Content-Type': 'application/json', 'channel': 'xcxpart', 'platform': 'MINI_PROGRAM', 'accept-language': 'zh-CN,zh;q=0.9', 'Cookie': this.cookie
@@ -143,15 +148,37 @@ class SFHttpClient {
   signHeaders() { const timestamp = String(Date.now()); return {syscode: SYS_CODE, timestamp, signature: md5(`token=${TOKEN}&timestamp=${timestamp}&sysCode=${SYS_CODE}`)}; }
   async post(url, data = {}, extra = {}) {
     const headers = {...this.headers, ...this.signHeaders(), ...extra};
-    const res = await httpPost(url, headers, data);
-    if (res && typeof res === 'object') this.checkCkInvalid(res);
-    return res;
+    const res = await httpPostRaw(url, headers, data);
+    if (!res) return null;
+    if (res.headers && typeof res.headers === 'object') this.extractNewCookie(res.headers);
+    if (res.body && typeof res.body === 'object') this.checkCkInvalid(res.body);
+    return res.body;
   }
   async postApp(url, data = {}) { return this.post(url, data, {'platform':'SFAPP'}); }
   checkCkInvalid(result) {
     if (!result || result.success === true) return;
     const text = ['errorMessage','message','msg','error','code','errorCode'].map(k => String(result[k] || '')).join(' ').toLowerCase();
     if (CK_INVALID_KEYWORDS.some(k => text.includes(k))) { this.ckInvalid = true; this.ckInvalidMessage = result.errorMessage || result.message || result.msg || 'CK失效了'; }
+  }
+  extractNewCookie(respHeaders) {
+    const sc = respHeaders['Set-Cookie'] || respHeaders['set-cookie'] || '';
+    if (!sc) return;
+    const newParts = [];
+    let changed = false;
+    for (const k of ['sessionId', '_login_mobile_', '_login_user_id_']) {
+      const m = sc.match(new RegExp(`${k}=([^;]+)`));
+      if (m) {
+        const nv = `${k}=${m[1]}`;
+        newParts.push(nv);
+        if (!this.cookie.includes(nv)) changed = true;
+      }
+    }
+    if (newParts.length >= 2 && changed) {
+      this.logger.success('检测到新 Cookie，自动更新');
+      this.cookie = newParts.join(';');
+      this.headers.Cookie = this.cookie;
+      this.ckRefreshed = true;
+    }
   }
 }
 
@@ -238,8 +265,33 @@ function oneLine(s){ return String(s || '').replace(/[\r\n]+/g, ' ').replace(/\s
 function isLowValue(text){ if (!/[券红包]/.test(text)) return false; const ms = text.match(/(\d+(?:\.\d+)?)\s*元/g)||[]; return ms.some(x => parseFloat(x) < DRAGON_BOAT_LOW_VALUE_LIMIT); }
 function filterDragonPrizes(ps){ return ps.filter(p => !DRAGON_EXCLUDE.some(r=>r.test(p)) && !isLowValue(p)); }
 function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
-function httpPost(url, headers, body){ return new Promise(resolve => $httpClient.post({url, headers, body: JSON.stringify(body)}, (e,r,d)=>{ if(e) return resolve(null); try{resolve(JSON.parse(d));}catch{resolve(null);} })); }
+function httpPostRaw(url, headers, body){ return new Promise(resolve => $httpClient.post({url, headers, body: JSON.stringify(body)}, (e,r,d)=>{ if(e) return resolve(null); try{resolve({headers: r.headers || {}, body: JSON.parse(d)});}catch{resolve(null);} })); }
 function finish(content){ $.log(content); $.msg('顺丰速运自动任务', '', content); $.done(); }
+
+// 通过 sign 签到刷新 CK：先尝试小程序签到，再尝试 APP 签到
+async function tryRefreshCookie(accountRaw, index) {
+  const logger = new Logger(`账号${index + 1} 刷新`);
+  const ck = safeDecode(accountRaw.split('#')[0].trim());
+  const http = new SFHttpClient(ck, logger);
+  // 调用小程序签到，响应头可能带回新的 Set-Cookie
+  const headers1 = {'platform':'MINI_PROGRAM','channel':'wxwddoudi'};
+  await http.post(`${BASE}/mcs-mimp/commonPost/~memberNonactivity~integralSignV2Service~sign`, {}, headers1);
+  if (http.ckRefreshed) {
+    const phone = (http.cookie.match(/_login_mobile_=([^;]+)/) || [,''])[1];
+    logger.success(`小程序签到刷新 CK 成功 ${maskPhone(phone) || ''}`);
+    return http.cookie;
+  }
+  // 再试 APP 签到
+  const deviceId = 'xxxxxxxx-xxxx-xxxx'.replace(/x/g, () => 'abcdef0123456789'[Math.floor(Math.random()*16)]);
+  const headers2 = {'platform':'SFAPP','channel':'doudiappwd','deviceid':deviceId};
+  await http.post(`${BASE}/mcs-mimp/commonPost/~memberNonactivity~integralSignV2Service~sign`, {}, headers2);
+  if (http.ckRefreshed) {
+    const phone = (http.cookie.match(/_login_mobile_=([^;]+)/) || [,''])[1];
+    logger.success(`APP 签到刷新 CK 成功 ${maskPhone(phone) || ''}`);
+    return http.cookie;
+  }
+  return null; // 未获取到新 CK，使用原值即可
+}
 
 function Env(name){ return {name, log:(...a)=>console.log(...a), msg:(t,s,b)=>$notification.post(t,s,b), getdata:k=>$persistentStore.read(k), setdata:(v,k)=>$persistentStore.write(v,k), done:(v={})=>$done(v)} }
 

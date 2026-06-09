@@ -1,11 +1,12 @@
 /**
- * 中国联通 Surge 版 v1.2.0-port
+ * 中国联通 Surge 版 v1.2.2-port
  * - HTTP request 模式：抓取 token_online/appId 保存为 chinaUnicomCookie
  * - Cron/Panel 模式：执行核心可跑任务：登录校验、资产查询、首页签到、签到区任务、月签有礼、天天领现金、通通乡村签到/任务(基础)
  * - 其它 Python 高复杂模块（权益超市/云盘/阅读爱听/安全管家/沃云手机/区域）暂以独立开关占位并在日志说明，后续逐项移植。
  */
 
 const $ = new Env('中国联通');
+const SCRIPT_VERSION = 'v1.2.2';
 const UA = 'Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}';
 const H5_UA = 'Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0}';
 const ENABLE_SIGN = readBool('UNICOM_ENABLE_SIGN', true);
@@ -38,7 +39,7 @@ async function main() {
   if (!raw) return finish('未找到 chinaUnicomCookie，请先打开中国联通 APP 触发抓取');
   const accounts = raw.split(/[&\n]/).map(x => x.trim()).filter(Boolean);
   const notify = [];
-  $.log(`共 ${accounts.length} 个账号 | ${enabledSummary()} 查询模式:${TEST_MODE}`);
+  $.log(`中国联通 Surge ${SCRIPT_VERSION} | 共 ${accounts.length} 个账号 | ${enabledSummary()} 查询模式:${TEST_MODE}`);
   for (let i = 0; i < accounts.length; i++) {
     const u = new UserService(i + 1, accounts[i]);
     if (!(await u.ensureLogin())) { u.log('登录失败/Token失效', true); notify.push(...u.notifyLogs); continue; }
@@ -171,8 +172,9 @@ class UserService {
     await this.signQueryMyPrizes();
     await this.signGetTelephone(false);
   }
+  signCookie() { return `ecs_token=${this.ecs_token}; token_online=${this.token_online}${this.appId ? '; appId='+this.appId : ''}`; }
   async signGetContinuous(query=false) {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/signin/getContinuous', {params:{taskId:'', channel:'wode', imei:this.uuid}, cookie:`ecs_token=${this.ecs_token}`});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/signin/getContinuous', {params:{taskId:'', channel:'wode', imei:this.uuid}, headers:{Referer:'https://img.client.10010.com/SigninApp/index.html', Origin:'https://img.client.10010.com'}, cookie:this.signCookie()});
     const j = parseJson(r?.body);
     if (j?.code === '0000') {
       const signed = j.data?.todayIsSignIn === 'y'; this.log(`签到区今天${signed ? '已' : '未'}签到`, true);
@@ -180,14 +182,14 @@ class UserService {
     } else this.log(`签到区查询签到状态失败[${j?.code || '?'}]: ${j?.desc || ''}`);
   }
   async signDaySign() {
-    const r = await this.request('post', 'https://activity.10010.com/sixPalaceGridTurntableLottery/signin/daySign', {form:{}, cookie:`ecs_token=${this.ecs_token}`});
+    const r = await this.request('post', 'https://activity.10010.com/sixPalaceGridTurntableLottery/signin/daySign', {form:{}, headers:{Referer:'https://img.client.10010.com/SigninApp/index.html', Origin:'https://img.client.10010.com'}, cookie:this.signCookie()});
     const j = parseJson(r?.body);
     if (j?.code === '0000') this.log(`签到区签到成功: [${j.data?.statusDesc || ''}]${j.data?.redSignMessage || ''}`, true);
     else if (j?.code === '0002' && String(j.desc||'').includes('已经签到')) this.log('签到区签到成功: 今日已完成签到！');
     else this.log(`签到区签到失败[${j?.code || '?'}]: ${j?.desc || ''}`);
   }
   async signGetTelephone(initial=false) {
-    const r = await this.request('post', 'https://act.10010.com/SigninApp/convert/getTelephone', {form:{}});
+    const r = await this.request('post', 'https://act.10010.com/SigninApp/convert/getTelephone', {form:{}, headers:{Referer:'https://img.client.10010.com/SigninApp/index.html', Origin:'https://act.10010.com'}});
     const j = parseJson(r?.body);
     if (j?.status === '0000' && j.data) {
       const amount = Number(j.data.telephone || 0);
@@ -200,7 +202,7 @@ class UserService {
   async signGetTaskList() {
     const url = 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/taskList';
     for (let i=0;i<20;i++) {
-      const r = await this.request('get', url, {params:{type:'2'}, headers:{Referer:'https://img.client.10010.com/'}, cookie:`ecs_token=${this.ecs_token}`});
+      const r = await this.request('get', url, {params:{type:'2'}, headers:{Referer:'https://img.client.10010.com/SigninApp/index.html', Origin:'https://img.client.10010.com'}, cookie:this.signCookie()});
       const j = parseJson(r?.body);
       if (!j || j.code !== '0000') { this.log(`签到区-任务中心: 获取任务列表失败[${j?.code || '?'}]: ${j?.desc || ''}`); return; }
       const tags = j.data?.tagList || [], tasks = [...(j.data?.taskList || []), ...tags.flatMap(t => t.taskDTOList || [])].filter(Boolean);
@@ -213,33 +215,33 @@ class UserService {
   }
   async gettaskip() { const orderId = randomString(32, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'); await this.request('post', 'https://m.client.10010.com/taskcallback/topstories/gettaskip', {form:{mobile:this.mobile, orderId}}); return orderId; }
   async signDoTask(task) {
-    if (task.url && task.url !== '1' && /^http/.test(task.url)) { await this.request('get', task.url, {headers:{Referer:'https://img.client.10010.com/'}}); await wait(3500); }
+    if (task.url && task.url !== '1' && /^http/.test(task.url)) { await this.request('get', task.url, {headers:{Referer:'https://img.client.10010.com/SigninApp/index.html'}, cookie:this.signCookie()}); await wait(3500); }
     const orderId = await this.gettaskip();
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/completeTask', {params:{taskId:task.id, orderId, systemCode:'QDQD'}, cookie:`ecs_token=${this.ecs_token}`});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/completeTask', {params:{taskId:task.id, orderId, systemCode:'QDQD'}, headers:{Referer:'https://img.client.10010.com/SigninApp/index.html'}, cookie:this.signCookie()});
     const j = parseJson(r?.body);
     this.log(`签到区-任务中心: ${j?.code === '0000' ? '✅' : '❌'} 任务[${task.taskName}] ${j?.desc || ''}`);
   }
   async signGetTaskReward(taskId) {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/getTaskReward', {params:{taskId}, cookie:`ecs_token=${this.ecs_token}`});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/getTaskReward', {params:{taskId}, headers:{Referer:'https://img.client.10010.com/SigninApp/index.html'}, cookie:this.signCookie()});
     const j = parseJson(r?.body), d = j?.data || {};
     if (j?.code === '0000' && d.code === '0000') this.log(`签到区-领取奖励: [${d.prizeName || ''}] ${d.prizeNameRed || ''}`, true);
     else this.log(`签到区-领取奖励失败[${d.code || j?.code || '?'}]: ${j?.desc || d.desc || ''}`);
   }
   async signMonthGift(query=false) {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/floor/getMonthSign', {headers:{Referer:'https://img.client.10010.com/'}, cookie:`ecs_token=${this.ecs_token}`});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/floor/getMonthSign', {headers:{Referer:'https://img.client.10010.com/SigninApp/index.html', Origin:'https://img.client.10010.com'}, cookie:this.signCookie()});
     const j = parseJson(r?.body); if (j?.code !== '0000') return this.log(`签到区-月签有礼: 查询失败[${j?.code || '?'}]: ${j?.desc || ''}`);
     const tasks = j.data?.taskList || [], claim = tasks.filter(t => String(t.taskStatus)==='1' && t.taskId && t.id);
     if (query) return this.log(`签到区-月签有礼: 可领取 ${claim.length} 个，已领取 ${tasks.filter(t=>String(t.taskStatus)==='2').length} 个`);
     for (const t of claim) { await this.signGetMonthReward(t); await wait(800); }
   }
   async signGetMonthReward(t) {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/getTaskReward', {params:{taskId:t.taskId, taskType:'30', id:t.id}, headers:{Referer:'https://img.client.10010.com/'}, cookie:`ecs_token=${this.ecs_token}`});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/getTaskReward', {params:{taskId:t.taskId, taskType:'30', id:t.id}, headers:{Referer:'https://img.client.10010.com/SigninApp/index.html'}, cookie:this.signCookie()});
     const j = parseJson(r?.body), d = j?.data || {};
     if (j?.code === '0000' && d.code === '0000') this.log(`签到区-月签有礼: [${t.taskName || '月签奖励'}] ${d.prizeName || ''} ${d.prizeNameRed || ''}`, true);
     else this.log(`签到区-月签有礼领取失败: ${d.desc || j?.desc || ''}`);
   }
   async signQueryMyPrizes() {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/prize/myPrize', {params:{pageNo:1,pageSize:5}, headers:{Referer:'https://img.client.10010.com/'}, cookie:`ecs_token=${this.ecs_token}`});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/prize/myPrize', {params:{pageNo:1,pageSize:5}, headers:{Referer:'https://img.client.10010.com/SigninApp/index.html'}, cookie:this.signCookie()});
     const j = parseJson(r?.body);
     if (j?.code !== '0000') return;
     const list = j.data?.list || j.data?.records || j.prizeList || [];

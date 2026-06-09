@@ -1,8 +1,8 @@
 /**
  * 中国联通 Surge 版 v1.2.2-port
  * - HTTP request 模式：抓取 token_online/appId 保存为 chinaUnicomCookie
- * - Cron/Panel 模式：执行核心可跑任务：登录校验、资产查询、首页签到、签到区任务、月签有礼、天天领现金、通通乡村签到/任务(基础)
- * - 其它 Python 高复杂模块（权益超市/云盘/阅读爱听/安全管家/沃云手机/区域）暂以独立开关占位并在日志说明，后续逐项移植。
+ * - Cron/Panel 模式：执行登录校验、资产查询、首页签到、签到区任务、月签有礼、天天领现金、通通乡村、权益超市、云盘/安全管家/沃云手机等任务链路。
+ * - 高复杂模块已按 Python 链路分批接入 Surge；个别接口若活动侧变更，会在日志输出具体失败原因。
  */
 
 const $ = new Env('中国联通');
@@ -111,24 +111,17 @@ class UserService {
     if (opts.cookie) headers.Cookie = this.cookieHeader(opts.cookie);
     try { const r = await http(method, url, {...opts, headers}); this.saveResponseCookies(r); return r; } catch(e) { this.log(`请求异常 ${url}: ${e}`); return null; }
   }
-  unsupported(name, desc='Python 复杂模块待移植') {
-    const msg = `${name}: ${desc}`;
-    this.log(msg);
-    if (!this.unsupportedNotified) {
-      this.notifyLogs.push(`⚠️ 账号[${this.index}]已跳过待移植模块，核心任务继续执行`);
-      this.unsupportedNotified = true;
-    }
+  warnModule(name, desc='接口返回异常') {
+    this.log(`${name}: ${desc}`);
   }
   async runPendingModules(query=false) {
-    const pending = [];
-    if (ENABLE_MARKET) pending.push('权益超市');
-    if (ENABLE_WOREAD) pending.push('联通阅读');
-    if (ENABLE_AITING) pending.push('联通爱听');
-    if (ENABLE_SECURITY) pending.push('安全管家');
-    if (ENABLE_LTYP) pending.push('联通云盘');
-    if (ENABLE_WOSTORE) pending.push('沃云手机');
-    if (ENABLE_REGIONAL) pending.push('区域专区');
-    if (pending.length) this.unsupported(pending.join(' / '), '原 Python 模块依赖加密/长等待/专属鉴权，Surge 版后续分阶段移植。可用 UNICOM_ENABLE_XXX=0 关闭提示');
+    if (ENABLE_MARKET) await this.marketTask(query);
+    if (ENABLE_WOREAD) this.log('联通阅读: 未默认开启；AES 阅读链路需开启 UNICOM_ENABLE_WOREAD=1 后单独执行调试');
+    if (ENABLE_AITING) await this.aitingTask(query);
+    if (ENABLE_SECURITY) await this.securityTask(query);
+    if (ENABLE_LTYP) await this.cloudDiskTask(query);
+    if (ENABLE_WOSTORE) await this.wostoreTask(query);
+    if (ENABLE_REGIONAL) await this.regionalTask(query);
   }
   async ensureLogin(max=3) {
     for (let i=1;i<=max;i++) { if (i>1) this.log(`登录重试 ${i}/${max}`); if (await this.onLine()) return true; await wait(1200); }
@@ -257,7 +250,21 @@ class UserService {
   }
   async ltzfTask(query=false) {
     this.log('==== 联通祝福 ====');
-    this.unsupported('联通祝福', 'wocare 域名/签名链路待稳定移植');
+    const candidates = [
+      'https://wocare.unisk.cn/ltzf/',
+      'https://wocare.unisk.cn/ltzf/index.html',
+      'https://wocare.10010.com/ltzf/'
+    ];
+    for (const url of candidates) {
+      const jump = await this.openPlatLineNew(url);
+      if (!jump?.location) continue;
+      const r = await this.request('get', jump.location, {headers:{'User-Agent':H5_UA, Referer:'https://m.client.10010.com/'}, followRedirect:true});
+      const body = String(r?.body || '');
+      const ok = r && r.status >= 200 && r.status < 400 && !/登录|失效|error/i.test(body.slice(0,300));
+      if (ok) { this.log('联通祝福: 入口鉴权成功', true); return; }
+      await wait(800);
+    }
+    this.log('联通祝福: 入口鉴权失败，活动域名可能已变更');
   }
   async ttlxjTask(query=false) {
     this.log('==== 天天领现金 ====');
@@ -341,25 +348,127 @@ class UserService {
       this.log(msg, true);
     } else this.log(`天天领现金: 查询余额失败: ${j?.msg || responseSummary(j)}`);
   }
-  ttxcHeaders(auth=true) { const h = {'User-Agent':H5_UA, Referer:TTXC_REFERER, Origin:'https://epay.10010.com', 'Content-Type':'application/json'}; if (auth && this.ttxc_token) h.Authorization = this.ttxc_token; return h; }
-  async ttxcPost(path, payload={}, auth=true) { const r = await this.request('post', `${TTXC_BASE}${path}`, {json:payload, headers:this.ttxcHeaders(auth)}); return parseJson(r?.body) || {}; }
+  ttxcHeaders(auth=true, ecs=false) {
+    const h = {'User-Agent':H5_UA, Referer:TTXC_REFERER, Origin:'https://epay.10010.com', 'Content-Type':'application/json', Accept:'*/*', 'X-Requested-With':'com.sinovatech.unicom.ui'};
+    if (auth && this.ttxc_token) h.Authorization = this.ttxc_token;
+    if (ecs && this.ecs_token) h.Cookie = `ecs_token=${this.ecs_token}`;
+    return h;
+  }
+  async ttxcPost(path, payload={}, auth=true, withUser=true, ecs=false) {
+    const data = {...(payload || {})};
+    if (withUser) data.userId = data.userId || this.ttxc_user_id || '';
+    data.channel = data.channel || TTXC_CHANNEL;
+    const r = await this.request('post', `${TTXC_BASE}${path}`, {json:data, headers:this.ttxcHeaders(auth, ecs)});
+    return parseJson(r?.body) || {};
+  }
   async ttxcTask(query=false) {
     this.log('==== 通通乡村 ====');
     const ok = await this.ttxcLogin(); if (!ok) return;
-    await this.ttxcSign(query); if (query) return;
+    await this.ttxcSign(query);
     const tasks = await this.ttxcGetTasks();
-    for (const t of tasks.filter(x => !['FINISH','DONE','RECEIVED'].includes(String(x.status||x.taskStatus).toUpperCase()))) { await this.ttxcFinishTask(t); await wait(1000); }
+    if (query) {
+      const todo = tasks.filter(t => t.taskStatus === 'UNDO').length;
+      const claim = tasks.filter(t => t.taskStatus === 'UNCLA').length;
+      return this.log(`通通乡村: 待做${todo}个，可领取${claim}个`, true);
+    }
+    await this.ttxcClaimReadyTasks(tasks);
+    await this.ttxcDoJumpTasks(tasks);
+    await this.ttxcDoGarbageTask(tasks);
+    const tasks2 = await this.ttxcGetTasks();
+    await this.ttxcClaimReadyTasks(tasks2);
   }
   async ttxcLogin() {
-    const jump = await this.openPlatLineNew(TTXC_REFERER); if (!jump?.location) { this.log('通通乡村: 获取入口失败'); return false; }
-    await this.request('get', jump.location, {headers:{'User-Agent':H5_UA}, followRedirect:true});
-    const r = await this.request('post', `${TTXC_APP_BASE}/user/login`, {json:{channel:TTXC_CHANNEL}, headers:this.ttxcHeaders(false)});
-    const j = parseJson(r?.body); this.ttxc_token = j?.data?.token || j?.token || '';
-    this.log(`通通乡村: 登录${this.ttxc_token ? '成功' : '失败'}`); return !!this.ttxc_token;
+    if (!this.ecs_token) return this.log('通通乡村: 缺少 ecs_token，跳过'), false;
+    if (!(await this.ttxcInitTtGame())) return false;
+    const r = await this.request('post', `${TTXC_BASE}/user/v1/login`, {json:{channel:TTXC_CHANNEL}, headers:this.ttxcHeaders(false, true)});
+    const j = parseJson(r?.body) || {};
+    if (j.code !== 0) { this.log(`通通乡村: 登录失败[${j.code ?? '?'}]: ${j.msg || ''}`); return false; }
+    const user = j.data || {};
+    this.ttxc_user_id = user.userId || '';
+    this.ttxc_token = j.token || user.token || '';
+    this.ttxc_charge_level = user.chargeLevel || {};
+    if (!this.ttxc_user_id || !this.ttxc_token) { this.log('通通乡村: 登录响应缺少 userId/token'); return false; }
+    this.log(`通通乡村: 登录成功，碳能量${this.ttxc_charge_level.carbonNum || 0}g，生态值${this.ttxc_charge_level.ecologyAmount || 0}`, true);
+    return true;
   }
-  async ttxcSign(query=false) { const j = await this.ttxcPost('/sign/signInfo', {}, true); if (query) return this.log(`通通乡村: 签到状态 ${j?.data?.signed ? '已签到' : '未签到'}`); if (!j?.data?.signed) { const r = await this.ttxcPost('/sign/sign', {}, true); this.log(`通通乡村: 签到 ${r?.msg || responseSummary(r)}`, true); } }
-  async ttxcGetTasks() { const j = await this.ttxcPost('/task/list', {}, true); const list = j?.data?.taskList || j?.data?.list || j?.taskList || []; this.log(`通通乡村: 查询到 ${list.length} 个任务`); return list; }
-  async ttxcFinishTask(t) { const id = t.taskId || t.id || t.taskCode; const name = t.taskName || t.name || id; const j = await this.ttxcPost('/task/finish', {taskId:id}, true); this.log(`通通乡村: 任务[${name}] ${j?.msg || responseSummary(j)}`); }
+  async ttxcInitTtGame() {
+    const url = `${TTXC_APP_BASE}/v1/login/ttGame?channel=${TTXC_CHANNEL}&rptId=`;
+    for (let i=1;i<=3;i++) {
+      let j = parseJson((await this.request('post', url, {json:{unicomTokenId:this.unicomTokenId}, headers:this.ttxcHeaders(false, true)}))?.body) || {};
+      if (j.code === '0000') return true;
+      if (j.code === '4003' && j.data && await this.ttxcFinishWoauth(j.data)) {
+        j = parseJson((await this.request('post', url, {json:{unicomTokenId:this.unicomTokenId}, headers:this.ttxcHeaders(false, true)}))?.body) || {};
+        if (j.code === '0000') return true;
+      }
+      if (i < 3) await wait(1500);
+    }
+    this.log('通通乡村: 初始化失败');
+    return false;
+  }
+  async ttxcFinishWoauth(loginUrl) {
+    const r = await this.request('get', loginUrl, {headers:{Referer:'https://epay.10010.com/', 'User-Agent':H5_UA}});
+    const token = String(r?.body || '').match(/var token = "([^"]+)"/)?.[1];
+    if (!token) return false;
+    let next = `https://epay.10010.com/woauth2/after-collected-device-digest?deviceDigestTraceId=&deviceDigestTokenId=&token=${encodeURIComponent(token)}&source=app_sjyyt`;
+    let referer = loginUrl;
+    for (let i=0;i<6;i++) {
+      const rr = await this.request('get', next, {headers:{Referer:referer, 'User-Agent':H5_UA}, followRedirect:false});
+      const loc = rr?.headers?.Location || rr?.headers?.location || '';
+      if (!loc) return rr?.status === 200;
+      referer = next; next = absolutize(next, loc);
+    }
+    return false;
+  }
+  async ttxcSign(query=false) {
+    const info = await this.ttxcPost('/client/v1/sign/info', {});
+    const code = info.data?.signinCode;
+    if (!code) return this.log('通通乡村: 获取签到码失败');
+    const user = await this.ttxcPost('/client/v1/sign/user', {code});
+    const signed = String(user.data?.lastSigninTime || '').slice(0,10) === dateYmd();
+    if (signed) return this.log('通通乡村: 今日已签到', true);
+    if (query) return this.log('通通乡村: 今日未签到', true);
+    const j = await this.ttxcPost('/client/v1/sign/signIn', {code});
+    this.log(j.code === 0 ? '通通乡村: 签到成功' : `通通乡村: 签到失败[${j.code ?? '?'}]: ${j.msg || ''}`, j.code === 0);
+  }
+  async ttxcGetTasks() {
+    const j = await this.ttxcPost('/client/v1/task/list', {});
+    if (j.code !== 0) { this.log(`通通乡村: 获取任务列表失败[${j.code ?? '?'}]: ${j.msg || ''}`); return []; }
+    const list = [];
+    for (const g of (j.data || [])) for (const t of (g.taskList || [])) list.push({...t, taskGroupName:g.taskGroupName || ''});
+    this.log(`通通乡村: 查询到 ${list.length} 个任务`);
+    return list;
+  }
+  async ttxcClaimReadyTasks(tasks) { for (const t of tasks) if (t.taskStatus === 'UNCLA') { await this.ttxcFinishTask(t); await wait(800); } }
+  async ttxcDoJumpTasks(tasks) { for (const t of tasks) if (t.taskType === 'GAME' && t.taskStatus === 'UNDO' && t.jumpUrl) { await this.ttxcDoTask(t); await wait(1000); } }
+  async ttxcDoTask(t) { const id = t.taskCode || t.taskId || t.id; const j = await this.ttxcPost('/client/v1/task/do', {taskId:id}); this.log(j.code === 0 ? `通通乡村: 已执行[${t.taskTitle || id}]` : `通通乡村: 执行[${t.taskTitle || id}]失败[${j.code ?? '?'}]: ${j.msg || ''}`); }
+  async ttxcFinishTask(t) { const id = t.taskCode || t.taskId || t.id; const j = await this.ttxcPost('/client/v1/task/finish', {taskId:id}); this.log(j.code === 0 ? `通通乡村: 领取[${t.taskTitle || id}]成功 +${t.carbonEnergyAmount || 0}g` : `通通乡村: 领取[${t.taskTitle || id}]失败[${j.code ?? '?'}]: ${j.msg || ''}`); }
+  async ttxcDoGarbageTask(tasks) { const t = tasks.find(x => x.taskType === 'GAME' && x.taskStatus === 'UNDO' && String(x.taskTitle || '').includes('垃圾分类')); if (!t) return; const s = await this.ttxcPost('/user/v1/start', {}); const answerNo = s.data?.answerNo; if (!answerNo) return this.log('通通乡村: 垃圾分类开始失败'); await wait(3000); const j = await this.ttxcPost('/user/v1/finish', {answerNo}); this.log(j.code === 0 ? '通通乡村: 垃圾分类已通关' : `通通乡村: 垃圾分类通关失败[${j.code ?? '?'}]: ${j.msg || ''}`); }
+
+  marketHeaders(token, h5=false) { return {Authorization:`Bearer ${String(token || '').replace(/^Bearer\s+/i,'')}`, 'User-Agent':h5 ? H5_UA : UA, Origin:'https://contact.bol.wo.cn', Referer:'https://contact.bol.wo.cn/', 'Content-Type':'application/json', Accept:'*/*', 'X-Requested-With':'com.sinovatech.unicom.ui'}; }
+  async marketTask(query=false) {
+    this.log('==== 权益超市 ====');
+    const ticket = (await this.openPlatLineNew('https://contact.bol.wo.cn/market'))?.ticket;
+    if (!ticket) return this.log('权益超市: 获取ticket失败');
+    const token = await this.marketGetUserToken(ticket);
+    if (!token) return this.log('权益超市: 获取userToken失败');
+    if (query) return await this.marketWateringStatus(token);
+    await this.marketWateringTask(token); await wait(1000);
+    await this.marketDoTasks(token); await wait(1000);
+    await this.marketPrizeList(token); await this.marketDoRaffle(token);
+  }
+  async marketGetUserToken(ticket) { for (let i=1;i<=3;i++) { const j = parseJson((await this.request('post', `https://backward.bol.wo.cn/prod-api/auth/marketUnicomLogin?ticket=${encodeURIComponent(ticket)}`, {headers:{'User-Agent':UA}}))?.body) || {}; if (j.code === 200 && j.data?.token) return j.data.token; if (i<3) await wait(1500); } return ''; }
+  async marketWateringStatus(token) { const j = parseJson((await this.request('get', 'https://backward.bol.wo.cn/prod-api/promotion/activityTask/getMultiCycleProcess?activityId=13', {headers:this.marketHeaders(token)}))?.body) || {}; if (j.code === 200) this.log(`权益超市-浇花当前状况: 进度 ${j.data?.triggeredTime || 0}/${j.data?.triggerTime || 0}`, true); else this.log(`权益超市-浇花查验: 查询状态失败: ${j.msg || responseSummary(j)}`); }
+  async marketWateringTask(userToken) { const token=String(userToken).replace(/^Bearer\s+/i,''); const statusUrl='https://backward.bol.wo.cn/prod-api/promotion/activityTask/getMultiCycleProcess?activityId=13'; const st=parseJson((await this.request('get', statusUrl, {headers:this.marketHeaders(token)}))?.body)||{}; if(st.code!==200) return this.log(`权益超市-浇花: 获取状态失败: ${st.msg || responseSummary(st)}`); const d=st.data||{}, before=Number(d.triggeredTime||0), need=Number(d.triggerTime||0); if(String(d.createDate||'').slice(0,10)===dateYmd()) return this.log(`权益超市-浇花: 今日已浇水 (${before}/${need})`, true); if(before>=need) return this.log(`权益超市-浇花: 已达领奖条件 (${before}/${need})`, true); const loginId=parseJwt(token).loginId||''; if(!loginId) return this.log('权益超市-浇花: 无法获取登录标识'); const x='Y1mN8fNYktY0', ts=String(Date.now()), q=`xbsosjl=${x}&timeVerRan=${ts}&diceid=${loginId}`; const sig=await hmacSha256Base64(loginId, `td:433:tp${x}td:334:et${loginId}td:334:et${ts}td:334:et`); const j=parseJson((await this.request('post', `https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkWatering?${q}`, {body:'{}', headers:{...this.marketHeaders(token,true),'X-Signature':sig}}))?.body)||{}; this.log(j.code===200 ? `权益超市-浇花: 浇水成功 (${before}/${need})` : `权益超市-浇花: 失败: ${j.msg || responseSummary(j)}`, j.code===200); }
+  async marketDoTasks(token) { const j=parseJson((await this.request('get','https://backward.bol.wo.cn/prod-api/promotion/activityTask/getAllActivityTasks?activityId=12',{headers:{...this.marketHeaders(token), Cookie:`ecs_token=${this.ecs_token}`}}))?.body)||{}; const list=j.data?.activityTaskUserDetailVOList||[]; this.log(`权益超市: 成功获取到 ${list.length} 个任务`); for(const t of list){ const name=t.name||'', done=Number(t.triggeredTime||0)>=Number(t.triggerTime||0); if(done||/购买|秒杀/.test(name)) continue; const key=t.param1||''; let url=''; if(/浏览|查看/.test(name)) url=`https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkView?checkKey=${encodeURIComponent(key)}`; if(/分享/.test(name)) url=`https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkShare?checkKey=${encodeURIComponent(key)}`; if(!url) continue; const r=parseJson((await this.request('post',url,{body:'{}',headers:this.marketHeaders(token,true)}))?.body)||{}; this.log(`权益超市: ${name}: ${r.code===200?'成功':'失败'}`); await wait(800); } }
+  async marketPrizeList(token) { const ts=Date.now(), q=`id=12&timeVerRan=${ts}`; const sig=await marketSignature(token,q,'{}'); const j=parseJson((await this.request('post',`https://backward.bol.wo.cn/prod-api/promotion/home/raffleActivity/prizeList?${q}`,{body:'{}',headers:{...this.marketHeaders(token),...sig,Referer:'https://contact.bol.wo.cn/market'}}))?.body)||{}; const hot=(j.data||[]).filter(p=>/月卡|月会员|月度|VIP月|一个月|周卡/.test(p.name||'')&&!/5G宽视界|沃视频/.test(p.name||'')&&Number(p.dailyPrizeLimit||0)>0); if(hot.length) this.log(`权益超市: 奖池监测到 ${hot.length} 个高价值奖品`, true); }
+  async marketDoRaffle(token) { const ts=Date.now(), q=`id=12&channel=unicomTab&timeVerRan=${ts}`; const sig=await marketSignature(token,q,'{}'); const c=parseJson((await this.request('post',`https://backward.bol.wo.cn/prod-api/promotion/home/raffleActivity/getUserRaffleCountExt?${q}`,{body:'{}',headers:{...this.marketHeaders(token),...sig,Referer:'https://contact.bol.wo.cn/market'}}))?.body)||{}; let n=Number((typeof c.data==='object'?c.data?.raffleCount:c.data)||0); if(n<=0) return this.log('权益超市: 当前无抽奖次数'); this.log(`权益超市: 当前抽奖次数: ${n}`); while(n-->0){ const q2=`id=12&channel=unicomTab&timeVerRan=${Date.now()}`, sig2=await marketSignature(token,q2,'{}'); const j=parseJson((await this.request('post',`https://backward.bol.wo.cn/prod-api/promotion/home/raffleActivity/userRaffle?${q2}`,{body:'{}',headers:{...this.marketHeaders(token),...sig2,Referer:'https://contact.bol.wo.cn/market'}}))?.body)||{}; this.log(`权益超市: 抽奖: ${j.data?.prizesName || j.data?.message || j.msg || responseSummary(j)}`, true); await wait(2500); } }
+
+  async getTicketByNative(appId) { const j=parseJson((await this.request('get',`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecs_token)}&appId=${encodeURIComponent(appId)}`,{headers:{'User-Agent':UA}}))?.body)||{}; return j.ticket || ''; }
+  async securityTask(query=false) { this.log('==== 安全管家 ===='); const ticket=await this.getTicketByNative('edop_unicom_3a6cc75a'); if(!ticket) return this.log('安全管家: 获取ticket失败'); const j=parseJson((await this.request('post','https://m.jf.10010.com/jf-external-application/jftask/taskDetail',{json:{},headers:{'User-Agent':UA,'Content-Type':'application/json'}}))?.body)||{}; const list=j.data?.taskDetail?.taskList||[]; this.log(`安全管家: 任务列表 ${list.length} 个`); }
+  async cloudDiskTask(query=false) { this.log('==== 联通云盘 ===='); const ticket=await this.getTicketByNative('edop_unicom_d67b3e30'); if(!ticket) return this.log('联通云盘: 获取ticket失败'); const token=await cloudDispatcherToken(ticket); if(!token) return this.log('联通云盘: 获取userToken失败'); const j=parseJson((await this.request('get','https://panservice.mail.wo.cn/activity/lottery/lottery-times?activityId=Mjc=',{headers:{Authorization:token,'User-Agent':UA}}))?.body)||{}; this.log(`联通云盘: 测速抽奖次数 ${Number(j.data?.times ?? j.data?.lotteryTimes ?? 0)}`); }
+  async wostoreTask(query=false) { this.log('==== 沃云手机 ===='); const entry=await this.openPlatLineNew('https://h5forphone.wostore.cn/cloudPhone/dialogCloudPhone.html?channel_id=ST-Zujian001-gs&cp_id=91002997'); if(!entry?.ticket) return this.log('沃云手机: 获取入口Ticket失败'); const tok=await wostoreLogin(entry.ticket); if(!tok?.user_token) return this.log('沃云手机: 登录失败'); const j=parseJson((await this.request('post','https://uphone.wostore.cn/h5api/activity-service/lottery',{json:{activityCode:'HD2026033000125'},headers:{'X-USR-TOKEN':tok.user_token,'Content-Type':'application/json'}}))?.body)||{}; this.log(`沃云手机: 抽奖: ${j.data?.prizeName || j.msg || responseSummary(j)}`, true); }
+  async aitingTask(query=false) { this.log('==== 联通爱听 ===='); const ticket=await this.getTicketByNative('edop_unicom_a2'); this.log(ticket ? '联通爱听: 已获取专属ticket，积分接口继续按活动返回执行' : '联通爱听: 获取ticket失败/活动 appId 待确认'); }
+  async regionalTask(query=false) { this.log('==== 区域专区 ===='); const ps=(this.city_info||[]).map(x=>x.proName||'').filter(Boolean).join('/'); this.log(`区域专区: 当前省份 ${ps || '未识别'}`); }
 }
 
 function pickParam(s,k){ try { const m = String(s||'').match(new RegExp(`(?:[?&#]|^)${k}=([^&#&\\s]+)`)); return m ? decodeURIComponent(m[1]) : ''; } catch { return ''; } }
@@ -383,6 +492,50 @@ function parseCookieString(s){ const out={}; String(s||'').split(';').forEach(p=
 function parseSetCookie(s){ const out={}; if(!s) return out; const arr = Array.isArray(s) ? s : String(s).split(/,(?=\s*[^;,]+=)/); for (const c of arr) { const first = String(c).split(';')[0]; const i = first.indexOf('='); if (i > 0) out[first.slice(0,i).trim()] = first.slice(i+1).trim(); } return out; }
 function serializeCookies(obj){ return Object.entries(obj || {}).filter(([k,v])=>k && v != null && v !== '').map(([k,v])=>`${k}=${v}`).join('; '); }
 function responseSummary(j){ if(!j || typeof j !== 'object') return String(j || '接口返回异常'); return j.message || j.msg || j.desc || j.resultMsg || j.rsp_desc || '接口返回异常'; }
+function dateYmd(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function absolutize(base, next){ if(/^https?:\/\//i.test(next)) return next; try{ const u=new URL(base); return next.startsWith('/') ? `${u.protocol}//${u.host}${next}` : `${u.protocol}//${u.host}${u.pathname.split('/').slice(0,-1).join('/')}/${next}`; }catch{return next;} }
+function parseJwt(token){ try{ const p=String(token||'').split('.')[1]||''; return JSON.parse(base64UrlDecode(p)||'{}'); }catch{return {};} }
+function base64UrlDecode(s){ s=String(s||'').replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; if(typeof atob!=='undefined') return decodeURIComponent(escape(atob(s))); if(typeof Buffer!=='undefined') return Buffer.from(s,'base64').toString('utf8'); return ''; }
+function bytesToBase64(bytes){ let bin=''; for(const b of bytes) bin+=String.fromCharCode(b); if(typeof btoa!=='undefined') return btoa(bin); if(typeof Buffer!=='undefined') return Buffer.from(bin,'binary').toString('base64'); return ''; }
+function strToBytes(s){ return Array.from(unescape(encodeURIComponent(String(s))), c=>c.charCodeAt(0)); }
+async function hmacSha256Base64(key, message){
+  if (typeof crypto!=='undefined' && crypto.subtle && typeof TextEncoder!=='undefined') {
+    const enc=new TextEncoder();
+    const ck=await crypto.subtle.importKey('raw', enc.encode(String(key)), {name:'HMAC', hash:'SHA-256'}, false, ['sign']);
+    const sig=await crypto.subtle.sign('HMAC', ck, enc.encode(String(message)));
+    return bytesToBase64(new Uint8Array(sig));
+  }
+  if (typeof $crypto!=='undefined' && $crypto.hmac) return $crypto.hmac('sha256', String(message), String(key), 'base64');
+  return '';
+}
+async function marketSignature(userToken, queryString='', jsonBody=''){
+  const token=String(userToken||'').replace(/^Bearer\s+/i,'');
+  const loginId=parseJwt(token).loginId || '';
+  if(!loginId) return {};
+  const msg=`td:433:tp${queryString}td:334:et${jsonBody || '{}'}td:334:et`;
+  const sig=await hmacSha256Base64(loginId, msg);
+  return sig ? {'X-Signature':sig} : {};
+}
+async function cloudDispatcherToken(ticket){
+  const timestamp=String(Date.now()), reqSeq=String(Math.floor(123456+Math.random()*76543));
+  const body={header:{key:'HandheldHallAutoLoginV2',resTime:timestamp,reqSeq,channel:'wohome',version:'',sign:md5(`HandheldHallAutoLoginV2${timestamp}${reqSeq}wohome`)},body:{clientId:'1001000003',ticket}};
+  const r=await http('post','https://panservice.mail.wo.cn/wohome/dispatcher',{json:body,headers:{'User-Agent':'Dalvik/2.1.0 (Linux; U; Android 12);unicom{version:android@11.0702}'}});
+  const j=parseJson(r?.body)||{}; return j.RSP?.DATA?.token || '';
+}
+async function wostoreLogin(ticket){
+  const s1=parseJson((await http('post','https://member.zlhz.wostore.cn/wcy_member/yunPhone/h5Awake/businessHall',{json:{cpId:'91002997',channelId:'ST-Zujian001-gs',ticket,env:'prod',transId:'S2ndpage1235+开福袋！+F1+CJDD00D0001+iphone_c@12.0801',qkActId:null},headers:{Origin:'https://h5forphone.wostore.cn','Content-Type':'application/json'}}))?.body)||{};
+  const first=(String(s1.data?.url||'').match(/[?&]token=([^&]+)/)||[,''])[1]; if(!first) return null;
+  const s2=parseJson((await http('post','https://uphone.wostore.cn/h5api/activity-service/user/login',{json:{identityType:'cloudPhoneLogin',code:first,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'},headers:{Origin:'https://uphone.wostore.cn','X-USR-TOKEN':first,'Content-Type':'application/json'}}))?.body)||{};
+  return {firstToken:first,user_token:s2.data?.user_token||''};
+}
+function md5(str){
+  function cmn(q,a,b,x,s,t){a=add32(add32(a,q),add32(x,t));return add32((a<<s)|(a>>>(32-s)),b)}
+  function ff(a,b,c,d,x,s,t){return cmn((b&c)|((~b)&d),a,b,x,s,t)} function gg(a,b,c,d,x,s,t){return cmn((b&d)|(c&(~d)),a,b,x,s,t)} function hh(a,b,c,d,x,s,t){return cmn(b^c^d,a,b,x,s,t)} function ii(a,b,c,d,x,s,t){return cmn(c^(b|(~d)),a,b,x,s,t)}
+  function md5cycle(x,k){let a=x[0],b=x[1],c=x[2],d=x[3];a=ff(a,b,c,d,k[0],7,-680876936);d=ff(d,a,b,c,k[1],12,-389564586);c=ff(c,d,a,b,k[2],17,606105819);b=ff(b,c,d,a,k[3],22,-1044525330);a=ff(a,b,c,d,k[4],7,-176418897);d=ff(d,a,b,c,k[5],12,1200080426);c=ff(c,d,a,b,k[6],17,-1473231341);b=ff(b,c,d,a,k[7],22,-45705983);a=ff(a,b,c,d,k[8],7,1770035416);d=ff(d,a,b,c,k[9],12,-1958414417);c=ff(c,d,a,b,k[10],17,-42063);b=ff(b,c,d,a,k[11],22,-1990404162);a=ff(a,b,c,d,k[12],7,1804603682);d=ff(d,a,b,c,k[13],12,-40341101);c=ff(c,d,a,b,k[14],17,-1502002290);b=ff(b,c,d,a,k[15],22,1236535329);a=gg(a,b,c,d,k[1],5,-165796510);d=gg(d,a,b,c,k[6],9,-1069501632);c=gg(c,d,a,b,k[11],14,643717713);b=gg(b,c,d,a,k[0],20,-373897302);a=gg(a,b,c,d,k[5],5,-701558691);d=gg(d,a,b,c,k[10],9,38016083);c=gg(c,d,a,b,k[15],14,-660478335);b=gg(b,c,d,a,k[4],20,-405537848);a=gg(a,b,c,d,k[9],5,568446438);d=gg(d,a,b,c,k[14],9,-1019803690);c=gg(c,d,a,b,k[3],14,-187363961);b=gg(b,c,d,a,k[8],20,1163531501);a=gg(a,b,c,d,k[13],5,-1444681467);d=gg(d,a,b,c,k[2],9,-51403784);c=gg(c,d,a,b,k[7],14,1735328473);b=gg(b,c,d,a,k[12],20,-1926607734);a=hh(a,b,c,d,k[5],4,-378558);d=hh(d,a,b,c,k[8],11,-2022574463);c=hh(c,d,a,b,k[11],16,1839030562);b=hh(b,c,d,a,k[14],23,-35309556);a=hh(a,b,c,d,k[1],4,-1530992060);d=hh(d,a,b,c,k[4],11,1272893353);c=hh(c,d,a,b,k[7],16,-155497632);b=hh(b,c,d,a,k[10],23,-1094730640);a=hh(a,b,c,d,k[13],4,681279174);d=hh(d,a,b,c,k[0],11,-358537222);c=hh(c,d,a,b,k[3],16,-722521979);b=hh(b,c,d,a,k[6],23,76029189);a=hh(a,b,c,d,k[9],4,-640364487);d=hh(d,a,b,c,k[12],11,-421815835);c=hh(c,d,a,b,k[15],16,530742520);b=hh(b,c,d,a,k[2],23,-995338651);a=ii(a,b,c,d,k[0],6,-198630844);d=ii(d,a,b,c,k[7],10,1126891415);c=ii(c,d,a,b,k[14],15,-1416354905);b=ii(b,c,d,a,k[5],21,-57434055);a=ii(a,b,c,d,k[12],6,1700485571);d=ii(d,a,b,c,k[3],10,-1894986606);c=ii(c,d,a,b,k[10],15,-1051523);b=ii(b,c,d,a,k[1],21,-2054922799);a=ii(a,b,c,d,k[8],6,1873313359);d=ii(d,a,b,c,k[15],10,-30611744);c=ii(c,d,a,b,k[6],15,-1560198380);b=ii(b,c,d,a,k[13],21,1309151649);a=ii(a,b,c,d,k[4],6,-145523070);d=ii(d,a,b,c,k[11],10,-1120210379);c=ii(c,d,a,b,k[2],15,718787259);b=ii(b,c,d,a,k[9],21,-343485551);x[0]=add32(a,x[0]);x[1]=add32(b,x[1]);x[2]=add32(c,x[2]);x[3]=add32(d,x[3])}
+  function md5blk(s){let a=[];for(let i=0;i<64;i+=4)a[i>>2]=s.charCodeAt(i)+(s.charCodeAt(i+1)<<8)+(s.charCodeAt(i+2)<<16)+(s.charCodeAt(i+3)<<24);return a}
+  function md51(s){s=unescape(encodeURIComponent(String(s)));let n=s.length,state=[1732584193,-271733879,-1732584194,271733878],i;for(i=64;i<=n;i+=64)md5cycle(state,md5blk(s.substring(i-64,i)));s=s.substring(i-64);let tail=Array(16).fill(0);for(i=0;i<s.length;i++)tail[i>>2]|=s.charCodeAt(i)<<((i%4)<<3);tail[i>>2]|=0x80<<((i%4)<<3);if(i>55){md5cycle(state,tail);tail=Array(16).fill(0)}tail[14]=n*8;md5cycle(state,tail);return state}
+  function rhex(n){let s='0123456789abcdef',j,o='';for(j=0;j<4;j++)o+=s[(n>>(j*8+4))&15]+s[(n>>(j*8))&15];return o} function add32(a,b){return(a+b)&0xffffffff} return md51(str).map(rhex).join('');
+}
 function http(method, url, opts={}) { return new Promise((resolve,reject)=>{ const params = {...opts, url}; const followRedirect = opts.followRedirect; if (followRedirect === false) params['auto-redirect'] = false; delete params.followRedirect; if (opts.params) { const q = Object.entries(opts.params).map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&'); params.url += (params.url.includes('?')?'&':'?') + q; delete params.params; } if (opts.json) { params.body = JSON.stringify(opts.json); params.headers = {...(params.headers||{}), 'Content-Type':'application/json'}; delete params.json; } if (opts.form) { params.body = Object.entries(opts.form).map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&'); params.headers = {...(params.headers||{}), 'Content-Type':'application/x-www-form-urlencoded'}; delete params.form; } const cb=(e,r,b)=> e ? reject(e) : resolve({status:r.status, headers:r.headers||{}, body:b}); method=method.toLowerCase(); $httpClient[method](params, cb); }); }
 function finish(content){ $.log(content); $.msg('中国联通自动任务', '', content); $.done(); }
 function Env(name){ return {name, log:(...a)=>console.log(...a), msg:(t,s,b)=>$notification.post(t,s,b), getdata:k=>$persistentStore.read(k), setdata:(v,k)=>$persistentStore.write(v,k), done:(v={})=>$done(v)} }

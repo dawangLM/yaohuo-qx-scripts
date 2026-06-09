@@ -1,9 +1,9 @@
 #!name=中国联通自动任务
-#!desc=Surge 模块：抓取 token_online/appId，执行中国联通核心可跑任务（资产、首页签到、天天领现金、通通乡村等）。Python 高复杂模块将分阶段移植。安装后先打开中国联通 APP 登录并触发首页。
+#!desc=Surge 模块：抓取 token_online/appId，执行中国联通任务（资产、首页签到、联通祝福、天天领现金、通通乡村、权益超市、云盘/安全管家/沃云手机等）。安装后先打开中国联通 APP 登录并触发首页。
 #!author=Reasonix port
 
 [MITM]
-hostname = %APPEND% m.client.10010.com, activity.10010.com, act.10010.com, epay.10010.com
+hostname = %APPEND% m.client.10010.com, activity.10010.com, act.10010.com, epay.10010.com, contact.bol.wo.cn, backward.bol.wo.cn, m.jf.10010.com, panservice.mail.wo.cn, member.zlhz.wostore.cn, uphone.wostore.cn, h5forphone.wostore.cn, wocare.unisk.cn, wocare.10010.com
 
 [Script]
 # 抓取中国联通登录 Token

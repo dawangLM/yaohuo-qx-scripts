@@ -44,12 +44,11 @@ async function main() {
     if (r.ck_invalid) lines.push(`❌ ${phone}: CK失效了`);
     else if (!r.success) lines.push(`❌ ${phone}: ${r.fail_reason || '登录失败'}`);
     else {
-      const parts = [`积分+${r.points_earned || 0}`];
-      if ((r.member_day_prizes || []).length) parts.push(`会员日:${oneLine(r.member_day_prizes.join(','))}`);
-      if (ENABLE_DRAGON_BOAT) parts.push(`端午金币${r.dragon_gold || 0}`);
+      lines.push(`✅ ${phone}: 积分+${r.points_earned || 0}`);
+      if ((r.member_day_prizes || []).length) lines.push(`会员日:${oneLine(r.member_day_prizes.join(','))}`);
+      if (ENABLE_DRAGON_BOAT) lines.push(`端午金币${r.dragon_gold || 0}`);
       const dp = filterDragonPrizes(r.dragon_prizes || []);
-      if (dp.length) parts.push(`端午奖品:${oneLine(dp.join(','))}`);
-      lines.push(`✅ ${phone}: ${parts.join(' | ')}`);
+      if (dp.length) lines.push(`端午奖品:${oneLine(dp.join(','))}`);
     }
   }
   lines.push(`📱 总账号: ${results.length} | 💰 总积分+${totalEarned}` + (ENABLE_DRAGON_BOAT ? ` | 端午金币${totalDragonGold}` : ''));

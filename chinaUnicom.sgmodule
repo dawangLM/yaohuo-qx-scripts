@@ -7,7 +7,7 @@ hostname = %APPEND% m.client.10010.com, activity.10010.com, act.10010.com, epay.
 
 [Script]
 # 抓取中国联通登录 Token
-中国联通Token = type=http-request,pattern=^https:\/\/m\.client\.10010\.com\/mobileService\/(onLine\.htm|.+),script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/chinaUnicom.surge.js?v=1.2.3,requires-body=0,timeout=10
+中国联通Token = type=http-request,pattern=^https:\/\/m\.client\.10010\.com\/mobileService\/(onLine\.htm|.+),script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/f48477ec162abc35843dfd7147dbbd024071eed9/chinaUnicom.surge.js,requires-body=0,timeout=10
 
 # 定时任务：每天 07:00 和 20:00
-中国联通自动任务 = type=cron,cronexp="0 7,20 * * *",wake-system=1,script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/chinaUnicom.surge.js?v=1.2.3,timeout=900
+中国联通自动任务 = type=cron,cronexp="0 7,20 * * *",wake-system=1,script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/f48477ec162abc35843dfd7147dbbd024071eed9/chinaUnicom.surge.js,timeout=900

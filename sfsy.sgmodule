@@ -11,6 +11,3 @@ hostname = %APPEND% mcs-mimp-web.sf-express.com, fee-gw.sf-express.com
 
 # 定时任务：06:11-18:11 每3小时一次
 顺丰速运自动任务 = type=cron,cronexp="11 6-18/3 * * *",wake-system=1,script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/sfsy.surge.js,timeout=600
-
-[Panel]
-顺丰速运 = script-name=顺丰速运自动任务,update-interval=3600

@@ -11,6 +11,3 @@ hostname = %APPEND% m.client.10010.com, activity.10010.com, act.10010.com, epay.
 
 # 定时任务：每天 07:00 和 20:00
 中国联通自动任务 = type=cron,cronexp="0 7,20 * * *",wake-system=1,script-path=https://raw.githubusercontent.com/dawangLM/yaohuo-qx-scripts/main/chinaUnicom.surge.js,timeout=900
-
-[Panel]
-中国联通 = script-name=中国联通自动任务,update-interval=3600

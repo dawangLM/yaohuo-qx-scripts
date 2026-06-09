@@ -17,7 +17,7 @@ const DRAGON_BOAT_LOW_VALUE_LIMIT = 12;
 const DAILY_SKIP_TASKS = ['用行业模板寄件下单', '用积分兑任意礼品', '参与积分活动', '每月累计寄件', '完成每月任务', '去使用AI寄件'];
 const MEMBER_DAY_SKIP_TASK_TYPES = ['SEND_SUCCESS', 'INVITEFRIENDS_PARTAKE_ACTIVITY', 'OPEN_SVIP', 'OPEN_NEW_EXPRESS_CARD', 'OPEN_FAMILY_CARD', 'CHARGE_NEW_EXPRESS_CARD', 'INTEGRAL_EXCHANGE'];
 const CK_INVALID_KEYWORDS = ['未登录','请登录','请先登录','登录失效','登录已失效','登录过期','会话失效','session失效','sessionid失效','sessionid已失效','token失效','重新登录','not_login','unauthorized'];
-const DRAGON_EXCLUDE = [/9折寄件券/, /(?<!1)2元寄件券/, /92折寄件券/, /2元寄件券[（(]满20元可用[）)]/, /海底捞7\.9折夜宵券/, /5元寄件券/];
+const DRAGON_EXCLUDE = [/9折寄件券/, /(?:^|[^1])2元寄件券/, /92折寄件券/, /2元寄件券[（(]满20元可用[）)]/, /海底捞7\.9折夜宵券/, /5元寄件券/];
 
 !(async () => {
   if (typeof $request !== 'undefined') return captureCookie();
@@ -67,9 +67,14 @@ function captureCookie() {
   const uid = (ck.match(/_login_user_id_=([^;]+)/) || [,''])[1];
   const list = old ? old.split('&').filter(Boolean) : [];
   const idx = list.findIndex(x => (uid && x.includes(`_login_user_id_=${uid}`)) || (phone && x.includes(`_login_mobile_=${phone}`)));
+  const isNewOrChanged = idx < 0 || list[idx] !== ck;
   if (idx >= 0) list[idx] = ck; else list.push(ck);
   $.setdata(list.join('&'), 'sfsyUrl');
-  $.msg('顺丰速运', 'Cookie 抓取成功', maskPhone(phone) || uid || '');
+  const notifyKey = `sfsy_cookie_notified_${uid || phone || md5(ck)}`;
+  if (isNewOrChanged && $.getdata(notifyKey) !== '1') {
+    $.setdata('1', notifyKey);
+    $.msg('顺丰速运', 'Cookie 抓取成功', maskPhone(phone) || uid || '');
+  }
   $.done({});
 }
 

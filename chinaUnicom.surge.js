@@ -105,7 +105,7 @@ class UserService {
     const parsed = parseSetCookie(setCookie);
     if (Object.keys(parsed).length) this.cookieJar = {...this.cookieJar, ...parsed};
   }
-  headers(extra={}) { return {'User-Agent': UA, 'Connection':'keep-alive', 'Cookie': this.cookieHeader(), ...extra}; }
+  headers(extra={}) { return {'User-Agent': UA, 'Cookie': this.cookieHeader(), ...extra}; }
   async request(method, url, opts={}) {
     const headers = {...this.headers(), ...(opts.headers || {})};
     if (opts.cookie) headers.Cookie = this.cookieHeader(opts.cookie);

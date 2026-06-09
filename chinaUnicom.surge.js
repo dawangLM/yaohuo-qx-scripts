@@ -8,7 +8,7 @@
 const $ = new Env('中国联通');
 const SCRIPT_VERSION = 'v1.2.2';
 const UA = 'Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}';
-const H5_UA = 'Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0}';
+const H5_UA = 'Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.146 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0};devicetype{deviceBrand:Xiaomi,deviceModel:MI 8}';
 const ENABLE_SIGN = readBool('UNICOM_ENABLE_SIGN', true);
 const ENABLE_LTZF = readBool('UNICOM_ENABLE_LTZF', true);
 const ENABLE_TTLXJ = readBool('UNICOM_ENABLE_TTLXJ', true);
@@ -379,8 +379,7 @@ class UserService {
   async ttxcLogin() {
     if (!this.ecs_token) return this.log('通通乡村: 缺少 ecs_token，跳过'), false;
     if (!(await this.ttxcInitTtGame())) return false;
-    const r = await this.request('post', `${TTXC_BASE}/user/v1/login`, {json:{}, headers:this.ttxcHeaders(false, true)});
-    const j = parseJson(r?.body) || {};
+    const j = await this.ttxcPost('/user/v1/login', {}, false, false, true);
     if (j.code !== 0) { this.log(`通通乡村: 登录失败[${j.code ?? '?'}]: ${j.msg || ''}`); return false; }
     const user = j.data || {};
     this.ttxc_user_id = user.userId || '';
@@ -416,9 +415,11 @@ class UserService {
     let current = loginUrl;
     let referer = 'https://epay.10010.com/';
     let lastStatus = '?';
+    let lastBody = '';
     for (let i=0; !token && i<6; i++) {
-      const r = await this.request('get', current, {headers:{Referer:referer, 'User-Agent':H5_UA}, followRedirect:false});
+      const r = await this.request('get', current, {headers:this.woauthHeaders(referer), followRedirect:false});
       lastStatus = r?.status || '?';
+      lastBody = String(r?.body || '');
       const loc = r?.headers?.Location || r?.headers?.location || '';
       token = extractWoauthToken(current) || extractWoauthToken(loc) || extractWoauthToken(r?.body || '');
       if (token) break;
@@ -428,7 +429,7 @@ class UserService {
     }
     if (!token) {
       if (String(lastStatus) === '200') {
-        this.log('通通乡村: woauth未取到token[200]，尝试复查初始化');
+        this.log(`通通乡村: woauth未取到token[200]，页面:${woauthPageHint(lastBody)}`);
         return true;
       }
       this.log(`通通乡村: woauth未取到token[${lastStatus}]`);
@@ -437,12 +438,23 @@ class UserService {
     let next = `https://epay.10010.com/woauth2/after-collected-device-digest?deviceDigestTraceId=&deviceDigestTokenId=&token=${encodeURIComponent(token)}&source=app_sjyyt`;
     referer = current;
     for (let i=0;i<6;i++) {
-      const rr = await this.request('get', next, {headers:{Referer:referer, 'User-Agent':H5_UA}, followRedirect:false});
+      const rr = await this.request('get', next, {headers:this.woauthHeaders(referer), followRedirect:false});
       const loc = rr?.headers?.Location || rr?.headers?.location || '';
       if (!loc) { if (rr?.status !== 200) this.log(`通通乡村: woauth结束状态异常[${rr?.status || '?'}]`); return rr?.status === 200; }
       referer = next; next = absolutize(next, loc);
     }
     return false;
+  }
+  woauthHeaders(referer) {
+    return {
+      'User-Agent': H5_UA,
+      Referer: referer || 'https://epay.10010.com/',
+      Origin: 'https://epay.10010.com',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
+      'X-Requested-With': 'com.sinovatech.unicom.ui',
+      Cookie: this.ecs_token ? `ecs_token=${this.ecs_token}` : this.cookieHeader()
+    };
   }
   async ttxcSign(query=false) {
     const info = await this.ttxcPost('/client/v1/sign/info', {});
@@ -532,6 +544,17 @@ function extractWoauthToken(s){
     if (m?.[1]) { try { return decodeURIComponent(m[1]); } catch { return m[1]; } }
   }
   return '';
+}
+function woauthPageHint(s){
+  s = String(s || '');
+  if (!s) return '空响应';
+  const marks = [];
+  if (/token/i.test(s)) marks.push('含token字样');
+  if (/error|失败|异常|invalid|unauthorized/i.test(s)) marks.push('错误页');
+  if (/滑块|captcha|验证|verify|risk|风控/i.test(s)) marks.push('验证页');
+  if (/success|成功|授权/i.test(s)) marks.push('授权页');
+  const title = (s.match(/<title[^>]*>([^<]{1,40})<\/title>/i) || [,''])[1].trim();
+  return `${marks.join('/') || '未知页'}${title ? ` title=${title}` : ''} len=${s.length}`;
 }
 function parseJwt(token){ try{ const p=String(token||'').split('.')[1]||''; return JSON.parse(base64UrlDecode(p)||'{}'); }catch{return {};} }
 function base64UrlDecode(s){ s=String(s||'').replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; if(typeof atob!=='undefined') return decodeURIComponent(escape(atob(s))); if(typeof Buffer!=='undefined') return Buffer.from(s,'base64').toString('utf8'); return ''; }

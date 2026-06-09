@@ -1,12 +1,12 @@
 /**
- * 中国联通 Surge 版 v1.2.4-port
+ * 中国联通 Surge 版 v1.2.5-port
  * - HTTP request 模式：抓取 token_online/appId 保存为 chinaUnicomCookie
  * - Cron/Panel 模式：执行登录校验、资产查询、首页签到、签到区任务、月签有礼、天天领现金、通通乡村、权益超市、云盘/安全管家/沃云手机等任务链路。
  * - 高复杂模块已按 Python 链路分批接入 Surge；个别接口若活动侧变更，会在日志输出具体失败原因。
  */
 
 const $ = new Env('中国联通');
-const SCRIPT_VERSION = 'v1.2.4';
+const SCRIPT_VERSION = 'v1.2.5';
 const UA = 'Dalvik/2.1.0 (Linux; U; Android 12; Mi 10 Pro MIUI/21.11.3);unicom{version:android@11.0802}';
 const H5_UA = 'Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/143.0.7499.146 Mobile Safari/537.36; unicom{version:android@11.0802,desmobile:0};devicetype{deviceBrand:Xiaomi,deviceModel:MI 8}';
 const ENABLE_SIGN = readBool('UNICOM_ENABLE_SIGN', true);
@@ -251,6 +251,7 @@ class UserService {
   async ltzfTask(query=false) {
     this.log('==== 联通祝福 ====');
     const candidates = [
+      'https://wocare.unisk.cn/',
       'https://wocare.unisk.cn/ltzf/',
       'https://wocare.unisk.cn/ltzf/index.html'
     ];
@@ -262,6 +263,7 @@ class UserService {
       const r = await this.request('get', jump.location, {headers:{'User-Agent':H5_UA, Referer:'https://m.client.10010.com/'}, followRedirect:true});
       const body = String(r?.body || '');
       const ok = r && r.status >= 200 && r.status < 400 && !/登录|失效|error/i.test(body.slice(0,300));
+      if (/系统升级中|维护中|暂停服务/.test(body)) { this.log('联通祝福: 官方入口显示系统升级中，跳过执行'); return; }
       if (ok) { this.log('联通祝福: 入口鉴权成功', true); return; }
       last = `${r?.status || '?'} ${oneLine(body).slice(0,80)}`;
       await wait(800);
@@ -506,7 +508,15 @@ class UserService {
   async getTicketByNative(appId) { const j=parseJson((await this.request('get',`https://m.client.10010.com/edop_ng/getTicketByNative?token=${encodeURIComponent(this.ecs_token)}&appId=${encodeURIComponent(appId)}`,{headers:{'User-Agent':UA}}))?.body)||{}; return j.ticket || ''; }
   async securityTask(query=false) { this.log('==== 安全管家 ===='); const ticket=await this.getTicketByNative('edop_unicom_3a6cc75a'); if(!ticket) return this.log('安全管家: 获取ticket失败'); const j=parseJson((await this.request('post','https://m.jf.10010.com/jf-external-application/jftask/taskDetail',{json:{},headers:{'User-Agent':UA,'Content-Type':'application/json'}}))?.body)||{}; const list=j.data?.taskDetail?.taskList||[]; this.log(`安全管家: 任务列表 ${list.length} 个`); }
   async cloudDiskTask(query=false) { this.log('==== 联通云盘 ===='); const ticket=await this.getTicketByNative('edop_unicom_d67b3e30'); if(!ticket) return this.log('联通云盘: 获取ticket失败'); const token=await cloudDispatcherToken(ticket); if(!token) return this.log('联通云盘: 获取userToken失败'); const j=parseJson((await this.request('get','https://panservice.mail.wo.cn/activity/lottery/lottery-times?activityId=Mjc=',{headers:{Authorization:token,'User-Agent':UA}}))?.body)||{}; this.log(`联通云盘: 测速抽奖次数 ${Number(j.data?.times ?? j.data?.lotteryTimes ?? 0)}`); }
-  async wostoreTask(query=false) { this.log('==== 沃云手机 ===='); const entry=await this.openPlatLineNew('https://h5forphone.wostore.cn/cloudPhone/dialogCloudPhone.html?channel_id=ST-Zujian001-gs&cp_id=91002997'); if(!entry?.ticket) return this.log(`沃云手机: 获取入口Ticket失败${entry?.location ? ' loc='+entry.location.slice(0,120) : ''}`); const tok=await wostoreLogin(entry.ticket); if(!tok?.user_token) return this.log(`沃云手机: 登录失败: ${tok?.message || tok?.msg || responseSummary(tok)}`); const j=parseJson((await this.request('post','https://uphone.wostore.cn/h5api/activity-service/lottery',{json:{activityCode:'HD2026033000125'},headers:{'X-USR-TOKEN':tok.user_token,'Content-Type':'application/json'}}))?.body)||{}; this.log(`沃云手机: 抽奖: ${j.data?.prizeName || j.msg || responseSummary(j)}`, true); }
+  async wostoreTask(query=false) {
+    this.log('==== 沃云手机 ====');
+    const entry=await this.openPlatLineNew('https://h5forphone.wostore.cn/cloudPhone/dialogCloudPhone.html?channel_id=ST-Zujian001-gs&cp_id=91002997');
+    if(!entry?.ticket) return this.log(`沃云手机: 获取入口Ticket失败${entry?.location ? ' loc='+entry.location.slice(0,120) : ''}`);
+    const tok=await wostoreLogin(entry.ticket);
+    if(!tok?.user_token) return this.log(`沃云手机: 登录失败: ${tok?.message || tok?.msg || responseSummary(tok)}`);
+    const j=parseJson((await this.request('post','https://uphone.wostore.cn/h5api/activity-service/lottery',{json:{activityCode:'HD2026033000125'},headers:{'X-USR-TOKEN':tok.user_token,'Content-Type':'application/json',Origin:'https://uphone.wostore.cn',Referer:'https://uphone.wostore.cn/cloudphone/'}}))?.body)||{};
+    this.log(`沃云手机: 抽奖: ${j.data?.prizeName || j.msg || responseSummary(j)}`, true);
+  }
   async aitingTask(query=false) { this.log('==== 联通爱听 ===='); const appIds=['edop_unicom_a2','edop_unicom_aiting','edop_unicom_a']; for (const appId of appIds) { const ticket=await this.getTicketByNative(appId); if(ticket) { this.log(`联通爱听: 已获取ticket appId=${appId}，活动接口待继续接入`, true); return; } await wait(300); } this.log('联通爱听: 获取ticket失败，候选 appId 均不可用'); }
   async regionalTask(query=false) { this.log('==== 区域专区 ===='); const ps=(this.city_info||[]).map(x=>x.proName||'').filter(Boolean).join('/'); this.log(`区域专区: 当前省份 ${ps || '未识别'}`); }
 }
@@ -590,10 +600,27 @@ async function cloudDispatcherToken(ticket){
   const j=parseJson(r?.body)||{}; return j.RSP?.DATA?.token || '';
 }
 async function wostoreLogin(ticket){
-  const s1=parseJson((await http('post','https://member.zlhz.wostore.cn/wcy_member/yunPhone/h5Awake/businessHall',{json:{cpId:'91002997',channelId:'ST-Zujian001-gs',ticket,env:'prod',transId:'S2ndpage1235+开福袋！+F1+CJDD00D0001+iphone_c@12.0801',qkActId:null},headers:{Origin:'https://h5forphone.wostore.cn','Content-Type':'application/json'}}))?.body)||{};
-  const first=(String(s1.data?.url||'').match(/[?&]token=([^&]+)/)||[,''])[1]; if(!first) return null;
-  const s2=parseJson((await http('post','https://uphone.wostore.cn/h5api/activity-service/user/login',{json:{identityType:'cloudPhoneLogin',code:first,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'},headers:{Origin:'https://uphone.wostore.cn','X-USR-TOKEN':first,'Content-Type':'application/json'}}))?.body)||{};
-  return {firstToken:first,user_token:s2.data?.user_token||''};
+  const common={cpId:'91002997',channelId:'ST-Zujian001-gs',ticket,env:'prod'};
+  const headers={Origin:'https://h5forphone.wostore.cn',Referer:'https://h5forphone.wostore.cn/cloudPhone/dialogCloudPhone.html?channel_id=ST-Zujian001-gs&cp_id=91002997','Content-Type':'application/json'};
+  await http('post','https://member.zlhz.wostore.cn/wcy_member/yunPhone/preCheck',{json:common,headers}).catch(()=>null);
+  const s1=parseJson((await http('post','https://member.zlhz.wostore.cn/wcy_member/yunPhone/h5Awake/businessHall',{json:{...common,transId:'',qkActId:''},headers}))?.body)||{};
+  const data=s1.data || {};
+  let first=data.token || (String(data.url||'').match(/[?&]token=([^&]+)/)||[,''])[1] || '';
+  if(!first) return {message:s1.msg || s1.message || responseSummary(s1)};
+  const code=decodeURIComponent(first);
+  const loginPayloads=[
+    {identityType:'cloudPhoneLogin',code,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'},
+    {identityType:'cloudPhoneLogin',code:first,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'},
+    {identityType:'cloudPhoneLogin',token:first,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'}
+  ];
+  let last={};
+  for (const payload of loginPayloads) {
+    const s2=parseJson((await http('post','https://uphone.wostore.cn/h5api/activity-service/user/login',{json:payload,headers:{Origin:'https://uphone.wostore.cn',Referer:'https://uphone.wostore.cn/cloudphone/','X-USR-TOKEN':first,'Content-Type':'application/json'}}))?.body)||{};
+    last=s2;
+    const userToken=s2.data?.user_token || s2.data?.userToken || s2.user_token || '';
+    if (userToken) return {firstToken:first,user_token:userToken};
+  }
+  return {firstToken:first,message:last.msg || last.message || responseSummary(last)};
 }
 function uuidv4(){ return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);}); }
 function hmacSha256Bytes(keyBytes,msgBytes){ const block=64; let key=keyBytes.slice(); if(key.length>block) key=sha256Bytes(key); if(key.length<block) key=key.concat(new Array(block-key.length).fill(0)); const o=new Array(block), i=new Array(block); for(let k=0;k<block;k++){ o[k]=key[k]^0x5c; i[k]=key[k]^0x36; } return sha256Bytes(o.concat(sha256Bytes(i.concat(msgBytes)))); }

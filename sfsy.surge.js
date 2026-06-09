@@ -24,7 +24,7 @@ const DRAGON_EXCLUDE = [/9折寄件券/, /(?:^|[^1])2元寄件券/, /92折寄件
   const raw = $.getdata('sfsyUrl') || $.getdata('sfsy_cookie') || '';
   if (!raw) return finish('未找到 sfsyUrl，请先打开顺丰速运小程序触发抓取');
   const accounts = raw.split('&').map(x => x.trim()).filter(Boolean);
-  const allUserIds = accounts.map(a => decodeURIComponent(a.split('#')[0])).map(a => (a.match(/_login_user_id_=([^;#&]+)/) || [,''])[1]).filter(Boolean);
+  const allUserIds = accounts.map(a => safeDecode(a.split('#')[0])).map(a => (a.match(/_login_user_id_=([^;#&]+)/) || [,''])[1]).filter(Boolean);
   $.log(`共 ${accounts.length} 个账号 | 日常:${ENABLE_DAILY_TASK} 会员日:${ENABLE_MEMBER_DAY} 端午:${ENABLE_DRAGON_BOAT}`);
   const results = [];
   for (let i = 0; i < accounts.length; i++) {
@@ -109,7 +109,7 @@ async function runAccount(accountRaw, index, allUserIds) {
 
 class SFHttpClient {
   constructor(cookie, logger) {
-    this.cookie = decodeURIComponent(cookie);
+    this.cookie = safeDecode(cookie);
     this.logger = logger;
     this.ckInvalid = false;
     this.ckInvalidMessage = '';
@@ -214,6 +214,7 @@ class DragonBoatExecutor {
 
 class Logger { constructor(prefix){this.prefix=prefix;} line(i,m){ $.log(`${i} ${this.prefix} ${m}`); } info(m){this.line('📝',m)} success(m){this.line('✅',m)} error(m){this.line('❌',m)} task(m){this.line('🎯',m)} points(p,pre='当前积分'){this.line('💰',`${pre}: 【${p}】`)} }
 function readBool(k,d){ const v=$.getdata(k); return v==null||v===''?d:!['0','false','False','FALSE'].includes(v); }
+function safeDecode(s){ try { return decodeURIComponent(String(s || '')); } catch { return String(s || ''); } }
 function maskPhone(p){ return p && p.length>=7 ? p.slice(0,3)+'****'+p.slice(7) : (p||''); }
 function isLowValue(text){ if (!/[券红包]/.test(text)) return false; const ms = text.match(/(\d+(?:\.\d+)?)\s*元/g)||[]; return ms.some(x => parseFloat(x) < DRAGON_BOAT_LOW_VALUE_LIMIT); }
 function filterDragonPrizes(ps){ return ps.filter(p => !DRAGON_EXCLUDE.some(r=>r.test(p)) && !isLowValue(p)); }

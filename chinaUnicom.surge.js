@@ -91,17 +91,24 @@ class UserService {
     this.unicomTokenId = randomString(32);
     this.tokenIdCookie = 'chinaunicom-' + randomString(32, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
     this.cookieString = `TOKENID_COOKIE=${this.tokenIdCookie}; UNICOM_TOKENID=${this.unicomTokenId}; sdkuuid=${this.unicomTokenId}; token_online=${this.token_online}` + (this.appId ? `; appId=${this.appId}` : '');
+    this.cookieJar = parseCookieString(this.cookieString);
     this.ecs_token = '';
     this.city_info = [];
     this.ttxc_token = '';
     this.unsupportedNotified = false;
   }
   log(msg, notify=false) { const line = `账号[${this.index}]${msg}`; $.log(`[${time()}] ${line}`); if (notify) this.notifyLogs.push(line); }
-  headers(extra={}) { return {'User-Agent': UA, 'Connection':'keep-alive', 'Cookie': this.cookieString, ...extra}; }
+  cookieHeader(extra='') { return serializeCookies({...this.cookieJar, ...parseCookieString(extra)}); }
+  saveResponseCookies(r) {
+    const setCookie = r?.headers?.['Set-Cookie'] || r?.headers?.['set-cookie'] || r?.headers?.['set-Cookie'];
+    const parsed = parseSetCookie(setCookie);
+    if (Object.keys(parsed).length) this.cookieJar = {...this.cookieJar, ...parsed};
+  }
+  headers(extra={}) { return {'User-Agent': UA, 'Connection':'keep-alive', 'Cookie': this.cookieHeader(), ...extra}; }
   async request(method, url, opts={}) {
     const headers = {...this.headers(), ...(opts.headers || {})};
-    if (opts.cookie) headers.Cookie = `${headers.Cookie || ''}; ${opts.cookie}`;
-    try { return await http(method, url, {...opts, headers}); } catch(e) { this.log(`请求异常 ${url}: ${e}`); return null; }
+    if (opts.cookie) headers.Cookie = this.cookieHeader(opts.cookie);
+    try { const r = await http(method, url, {...opts, headers}); this.saveResponseCookies(r); return r; } catch(e) { this.log(`请求异常 ${url}: ${e}`); return null; }
   }
   unsupported(name, desc='Python 复杂模块待移植') {
     const msg = `${name}: ${desc}`;
@@ -133,9 +140,12 @@ class UserService {
     const r = await this.request('post', 'https://m.client.10010.com/mobileService/onLine.htm', {form:data});
     const j = parseJson(r?.body);
     if (j && (j.code === '0' || j.code === 0)) {
+      this.saveResponseCookies(r);
       const des = j.desmobile || '';
       if (/^1\d{10}$/.test(des)) this.mobile = des;
       this.ecs_token = j.ecs_token || ''; this.city_info = j.list || [];
+      if (this.ecs_token) this.cookieJar.ecs_token = this.ecs_token;
+      if (j.t3_token) this.cookieJar.t3_token = j.t3_token;
       this.log(`登录成功 ${mask(this.mobile)}`);
       return true;
     }
@@ -145,7 +155,7 @@ class UserService {
   async queryRemain() {
     if (!this.ecs_token) return;
     this.log('==== 资产查询 ====');
-    const r = await this.request('get', 'https://m.client.10010.com/servicequerybusiness/balancenew/accountBalancenew.htm', {headers:{'User-Agent':UA, 'Cookie':`ecs_token=${this.ecs_token}`}});
+    const r = await this.request('get', 'https://m.client.10010.com/servicequerybusiness/balancenew/accountBalancenew.htm', {headers:{'User-Agent':UA}, cookie:`ecs_token=${this.ecs_token}`});
     const j = parseJson(r?.body);
     if (j?.code === '0000') {
       const bal = j.curntbalancecust || '0.00', fee = j.realfeecust || '0.00';
@@ -162,7 +172,7 @@ class UserService {
     await this.signGetTelephone(false);
   }
   async signGetContinuous(query=false) {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/signin/getContinuous', {params:{taskId:'', channel:'wode', imei:this.uuid}});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/signin/getContinuous', {params:{taskId:'', channel:'wode', imei:this.uuid}, cookie:`ecs_token=${this.ecs_token}`});
     const j = parseJson(r?.body);
     if (j?.code === '0000') {
       const signed = j.data?.todayIsSignIn === 'y'; this.log(`签到区今天${signed ? '已' : '未'}签到`, true);
@@ -170,7 +180,7 @@ class UserService {
     } else this.log(`签到区查询签到状态失败[${j?.code || '?'}]: ${j?.desc || ''}`);
   }
   async signDaySign() {
-    const r = await this.request('post', 'https://activity.10010.com/sixPalaceGridTurntableLottery/signin/daySign', {form:{}});
+    const r = await this.request('post', 'https://activity.10010.com/sixPalaceGridTurntableLottery/signin/daySign', {form:{}, cookie:`ecs_token=${this.ecs_token}`});
     const j = parseJson(r?.body);
     if (j?.code === '0000') this.log(`签到区签到成功: [${j.data?.statusDesc || ''}]${j.data?.redSignMessage || ''}`, true);
     else if (j?.code === '0002' && String(j.desc||'').includes('已经签到')) this.log('签到区签到成功: 今日已完成签到！');
@@ -190,7 +200,7 @@ class UserService {
   async signGetTaskList() {
     const url = 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/taskList';
     for (let i=0;i<20;i++) {
-      const r = await this.request('get', url, {params:{type:'2'}, headers:{Referer:'https://img.client.10010.com/'}});
+      const r = await this.request('get', url, {params:{type:'2'}, headers:{Referer:'https://img.client.10010.com/'}, cookie:`ecs_token=${this.ecs_token}`});
       const j = parseJson(r?.body);
       if (!j || j.code !== '0000') { this.log(`签到区-任务中心: 获取任务列表失败[${j?.code || '?'}]: ${j?.desc || ''}`); return; }
       const tags = j.data?.tagList || [], tasks = [...(j.data?.taskList || []), ...tags.flatMap(t => t.taskDTOList || [])].filter(Boolean);
@@ -205,31 +215,31 @@ class UserService {
   async signDoTask(task) {
     if (task.url && task.url !== '1' && /^http/.test(task.url)) { await this.request('get', task.url, {headers:{Referer:'https://img.client.10010.com/'}}); await wait(3500); }
     const orderId = await this.gettaskip();
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/completeTask', {params:{taskId:task.id, orderId, systemCode:'QDQD'}});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/completeTask', {params:{taskId:task.id, orderId, systemCode:'QDQD'}, cookie:`ecs_token=${this.ecs_token}`});
     const j = parseJson(r?.body);
     this.log(`签到区-任务中心: ${j?.code === '0000' ? '✅' : '❌'} 任务[${task.taskName}] ${j?.desc || ''}`);
   }
   async signGetTaskReward(taskId) {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/getTaskReward', {params:{taskId}});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/getTaskReward', {params:{taskId}, cookie:`ecs_token=${this.ecs_token}`});
     const j = parseJson(r?.body), d = j?.data || {};
     if (j?.code === '0000' && d.code === '0000') this.log(`签到区-领取奖励: [${d.prizeName || ''}] ${d.prizeNameRed || ''}`, true);
     else this.log(`签到区-领取奖励失败[${d.code || j?.code || '?'}]: ${j?.desc || d.desc || ''}`);
   }
   async signMonthGift(query=false) {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/floor/getMonthSign', {headers:{Referer:'https://img.client.10010.com/'}});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/floor/getMonthSign', {headers:{Referer:'https://img.client.10010.com/'}, cookie:`ecs_token=${this.ecs_token}`});
     const j = parseJson(r?.body); if (j?.code !== '0000') return this.log(`签到区-月签有礼: 查询失败[${j?.code || '?'}]: ${j?.desc || ''}`);
     const tasks = j.data?.taskList || [], claim = tasks.filter(t => String(t.taskStatus)==='1' && t.taskId && t.id);
     if (query) return this.log(`签到区-月签有礼: 可领取 ${claim.length} 个，已领取 ${tasks.filter(t=>String(t.taskStatus)==='2').length} 个`);
     for (const t of claim) { await this.signGetMonthReward(t); await wait(800); }
   }
   async signGetMonthReward(t) {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/getTaskReward', {params:{taskId:t.taskId, taskType:'30', id:t.id}, headers:{Referer:'https://img.client.10010.com/'}});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/task/getTaskReward', {params:{taskId:t.taskId, taskType:'30', id:t.id}, headers:{Referer:'https://img.client.10010.com/'}, cookie:`ecs_token=${this.ecs_token}`});
     const j = parseJson(r?.body), d = j?.data || {};
     if (j?.code === '0000' && d.code === '0000') this.log(`签到区-月签有礼: [${t.taskName || '月签奖励'}] ${d.prizeName || ''} ${d.prizeNameRed || ''}`, true);
     else this.log(`签到区-月签有礼领取失败: ${d.desc || j?.desc || ''}`);
   }
   async signQueryMyPrizes() {
-    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/prize/myPrize', {params:{pageNo:1,pageSize:5}, headers:{Referer:'https://img.client.10010.com/'}});
+    const r = await this.request('get', 'https://activity.10010.com/sixPalaceGridTurntableLottery/prize/myPrize', {params:{pageNo:1,pageSize:5}, headers:{Referer:'https://img.client.10010.com/'}, cookie:`ecs_token=${this.ecs_token}`});
     const j = parseJson(r?.body);
     if (j?.code !== '0000') return;
     const list = j.data?.list || j.data?.records || j.prizeList || [];
@@ -237,7 +247,7 @@ class UserService {
   }
   async openPlatLineNew(toUrl) {
     if (!this.ecs_token) return null;
-    const r = await this.request('get', 'https://m.client.10010.com/mobileService/openPlatform/openPlatLineNew.htm', {params:{to_url:toUrl}, cookie:`ecs_token=${this.ecs_token}`, followRedirect:false});
+    const r = await this.request('get', 'https://m.client.10010.com/mobileService/openPlatform/openPlatLineNew.htm', {params:{to_url:toUrl}, cookie:`ecs_token=${this.ecs_token}; token_online=${this.token_online}${this.appId ? '; appId='+this.appId : ''}`, followRedirect:false});
     const loc = r?.headers?.Location || r?.headers?.location || '';
     const ticket = (loc.match(/[?&]ticket=([^&]+)/)||[,''])[1];
     const type = (loc.match(/[?&]type=([^&]+)/)||[,''])[1];
@@ -294,8 +304,10 @@ class UserService {
     const full = `${loginUrl}https://epay.10010.com/ci-mcss-party-web/clockIn/?bizFrom=225&bizChannelCode=225`;
     const r = await this.request('get', full, {headers:{'User-Agent':H5_UA}, followRedirect:false});
     const loc = r?.headers?.Location || r?.headers?.location || '';
-    const rptid = (loc.match(/[?&]rptid=([^&]+)/)||[,''])[1];
+    const body = String(r?.body || '');
+    const rptid = (loc.match(/[?&]rptid=([^&]+)/) || body.match(/[?&]rptid=([^&"'<>]+)/) || [,''])[1];
     if (rptid) { this.rptId = rptid; return true; }
+    if (r?.status === 200) { this.log('天天领现金: Login返回200，继续AuthCheck验证'); return true; }
     this.log(`天天领现金: Login失败[${r?.status || '?'}]`);
     return false;
   }
@@ -365,6 +377,9 @@ function randomString(n, chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUV
 function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
 function time(){ const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; }
 function parseJson(s){ try { return typeof s === 'object' ? s : JSON.parse(s || '{}'); } catch { return null; } }
+function parseCookieString(s){ const out={}; String(s||'').split(';').forEach(p=>{ const i=p.indexOf('='); if(i>0){ const k=p.slice(0,i).trim(); if(k) out[k]=p.slice(i+1).trim(); } }); return out; }
+function parseSetCookie(s){ const out={}; if(!s) return out; const arr = Array.isArray(s) ? s : String(s).split(/,(?=\s*[^;,]+=)/); for (const c of arr) { const first = String(c).split(';')[0]; const i = first.indexOf('='); if (i > 0) out[first.slice(0,i).trim()] = first.slice(i+1).trim(); } return out; }
+function serializeCookies(obj){ return Object.entries(obj || {}).filter(([k,v])=>k && v != null && v !== '').map(([k,v])=>`${k}=${v}`).join('; '); }
 function responseSummary(j){ if(!j || typeof j !== 'object') return String(j || '接口返回异常'); return j.message || j.msg || j.desc || j.resultMsg || j.rsp_desc || '接口返回异常'; }
 function http(method, url, opts={}) { return new Promise((resolve,reject)=>{ const params = {...opts, url}; const followRedirect = opts.followRedirect; if (followRedirect === false) params['auto-redirect'] = false; delete params.followRedirect; if (opts.params) { const q = Object.entries(opts.params).map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&'); params.url += (params.url.includes('?')?'&':'?') + q; delete params.params; } if (opts.json) { params.body = JSON.stringify(opts.json); params.headers = {...(params.headers||{}), 'Content-Type':'application/json'}; delete params.json; } if (opts.form) { params.body = Object.entries(opts.form).map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&'); params.headers = {...(params.headers||{}), 'Content-Type':'application/x-www-form-urlencoded'}; delete params.form; } const cb=(e,r,b)=> e ? reject(e) : resolve({status:r.status, headers:r.headers||{}, body:b}); method=method.toLowerCase(); $httpClient[method](params, cb); }); }
 function finish(content){ $.log(content); $.msg('中国联通自动任务', '', content); $.done(); }

@@ -252,8 +252,7 @@ class UserService {
     this.log('==== 联通祝福 ====');
     const candidates = [
       'https://wocare.unisk.cn/ltzf/',
-      'https://wocare.unisk.cn/ltzf/index.html',
-      'https://wocare.10010.com/ltzf/'
+      'https://wocare.unisk.cn/ltzf/index.html'
     ];
     for (const url of candidates) {
       const jump = await this.openPlatLineNew(url);
@@ -380,7 +379,7 @@ class UserService {
   async ttxcLogin() {
     if (!this.ecs_token) return this.log('通通乡村: 缺少 ecs_token，跳过'), false;
     if (!(await this.ttxcInitTtGame())) return false;
-    const r = await this.request('post', `${TTXC_BASE}/user/v1/login`, {json:{channel:TTXC_CHANNEL}, headers:this.ttxcHeaders(false, true)});
+    const r = await this.request('post', `${TTXC_BASE}/user/v1/login`, {json:{}, headers:this.ttxcHeaders(false, true)});
     const j = parseJson(r?.body) || {};
     if (j.code !== 0) { this.log(`通通乡村: 登录失败[${j.code ?? '?'}]: ${j.msg || ''}`); return false; }
     const user = j.data || {};
@@ -393,28 +392,35 @@ class UserService {
   }
   async ttxcInitTtGame() {
     const url = `${TTXC_APP_BASE}/v1/login/ttGame?channel=${TTXC_CHANNEL}&rptId=`;
+    let last = {};
     for (let i=1;i<=3;i++) {
       let j = parseJson((await this.request('post', url, {json:{unicomTokenId:this.unicomTokenId}, headers:this.ttxcHeaders(false, true)}))?.body) || {};
+      last = j;
       if (j.code === '0000') return true;
-      if (j.code === '4003' && j.data && await this.ttxcFinishWoauth(j.data)) {
-        j = parseJson((await this.request('post', url, {json:{unicomTokenId:this.unicomTokenId}, headers:this.ttxcHeaders(false, true)}))?.body) || {};
-        if (j.code === '0000') return true;
+      if (j.code === '4003' && j.data) {
+        const done = await this.ttxcFinishWoauth(j.data);
+        if (!done) this.log('通通乡村: woauth授权未完成');
+        if (done) {
+          j = parseJson((await this.request('post', url, {json:{unicomTokenId:this.unicomTokenId}, headers:this.ttxcHeaders(false, true)}))?.body) || {};
+          last = j;
+          if (j.code === '0000') return true;
+        }
       }
-      if (i < 3) await wait(1500);
+      if (i < 3) await wait(2000);
     }
-    this.log('通通乡村: 初始化失败');
+    this.log(`通通乡村: 初始化失败[${last.code ?? '?'}]: ${last.msg || ''}`);
     return false;
   }
   async ttxcFinishWoauth(loginUrl) {
     const r = await this.request('get', loginUrl, {headers:{Referer:'https://epay.10010.com/', 'User-Agent':H5_UA}});
     const token = String(r?.body || '').match(/var token = "([^"]+)"/)?.[1];
-    if (!token) return false;
+    if (!token) { this.log(`通通乡村: woauth未取到token[${r?.status || '?'}]`); return false; }
     let next = `https://epay.10010.com/woauth2/after-collected-device-digest?deviceDigestTraceId=&deviceDigestTokenId=&token=${encodeURIComponent(token)}&source=app_sjyyt`;
     let referer = loginUrl;
     for (let i=0;i<6;i++) {
       const rr = await this.request('get', next, {headers:{Referer:referer, 'User-Agent':H5_UA}, followRedirect:false});
       const loc = rr?.headers?.Location || rr?.headers?.location || '';
-      if (!loc) return rr?.status === 200;
+      if (!loc) { if (rr?.status !== 200) this.log(`通通乡村: woauth结束状态异常[${rr?.status || '?'}]`); return rr?.status === 200; }
       referer = next; next = absolutize(next, loc);
     }
     return false;
@@ -458,7 +464,7 @@ class UserService {
   }
   async marketGetUserToken(ticket) { for (let i=1;i<=3;i++) { const j = parseJson((await this.request('post', `https://backward.bol.wo.cn/prod-api/auth/marketUnicomLogin?ticket=${encodeURIComponent(ticket)}`, {headers:{'User-Agent':UA}}))?.body) || {}; if (j.code === 200 && j.data?.token) return j.data.token; if (i<3) await wait(1500); } return ''; }
   async marketWateringStatus(token) { const j = parseJson((await this.request('get', 'https://backward.bol.wo.cn/prod-api/promotion/activityTask/getMultiCycleProcess?activityId=13', {headers:this.marketHeaders(token)}))?.body) || {}; if (j.code === 200) this.log(`权益超市-浇花当前状况: 进度 ${j.data?.triggeredTime || 0}/${j.data?.triggerTime || 0}`, true); else this.log(`权益超市-浇花查验: 查询状态失败: ${j.msg || responseSummary(j)}`); }
-  async marketWateringTask(userToken) { const token=String(userToken).replace(/^Bearer\s+/i,''); const statusUrl='https://backward.bol.wo.cn/prod-api/promotion/activityTask/getMultiCycleProcess?activityId=13'; const st=parseJson((await this.request('get', statusUrl, {headers:this.marketHeaders(token)}))?.body)||{}; if(st.code!==200) return this.log(`权益超市-浇花: 获取状态失败: ${st.msg || responseSummary(st)}`); const d=st.data||{}, before=Number(d.triggeredTime||0), need=Number(d.triggerTime||0); if(String(d.createDate||'').slice(0,10)===dateYmd()) return this.log(`权益超市-浇花: 今日已浇水 (${before}/${need})`, true); if(before>=need) return this.log(`权益超市-浇花: 已达领奖条件 (${before}/${need})`, true); const loginId=parseJwt(token).loginId||''; if(!loginId) return this.log('权益超市-浇花: 无法获取登录标识'); const x='Y1mN8fNYktY0', ts=String(Date.now()), q=`xbsosjl=${x}&timeVerRan=${ts}&diceid=${loginId}`; const sig=await hmacSha256Base64(loginId, `td:433:tp${x}td:334:et${loginId}td:334:et${ts}td:334:et`); const j=parseJson((await this.request('post', `https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkWatering?${q}`, {body:'{}', headers:{...this.marketHeaders(token,true),'X-Signature':sig}}))?.body)||{}; this.log(j.code===200 ? `权益超市-浇花: 浇水成功 (${before}/${need})` : `权益超市-浇花: 失败: ${j.msg || responseSummary(j)}`, j.code===200); }
+  async marketWateringTask(userToken) { const token=String(userToken).replace(/^Bearer\s+/i,''); const statusUrl='https://backward.bol.wo.cn/prod-api/promotion/activityTask/getMultiCycleProcess?activityId=13'; const st=parseJson((await this.request('get', statusUrl, {headers:this.marketHeaders(token)}))?.body)||{}; if(st.code!==200) return this.log(`权益超市-浇花: 获取状态失败: ${st.msg || responseSummary(st)}`); const d=st.data||{}, before=Number(d.triggeredTime||0), need=Number(d.triggerTime||0); if(String(d.createDate||'').slice(0,10)===dateYmd()) return this.log(`权益超市-浇花: 今日已浇水 (${before}/${need})`, true); if(before>=need) return this.log(`权益超市-浇花: 已达领奖条件 (${before}/${need})`, true); const loginId=parseJwt(token).loginId||''; if(!loginId) return this.log('权益超市-浇花: 无法获取登录标识'); const x='Y1mN8fNYktY0', ts=String(Date.now()), q=`xbsosjl=${x}&timeVerRan=${ts}&diceid=${loginId}`; const sig=await hmacSha256Base64(String(loginId), `td:433:tp${x}td:334:et${loginId}td:334:et${ts}td:334:et`); const h={Authorization:`Bearer ${token}`,'X-Signature':sig,'User-Agent':H5_UA,'Content-Type':'application/json',Origin:'https://contact.bol.wo.cn',Referer:'https://contact.bol.wo.cn/','X-Requested-With':'com.sinovatech.unicom.ui',Accept:'*/*'}; const j=parseJson((await this.request('post', `https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkWatering?${q}`, {body:'{}', headers:h}))?.body)||{}; if(j.code!==200) return this.log(`权益超市-浇花: 失败: ${j.msg || responseSummary(j)}`); await wait(1000); const ck=parseJson((await this.request('get', statusUrl, {headers:this.marketHeaders(token)}))?.body)||{}; const after=Number(ck.data?.triggeredTime ?? before); this.log(after!==before ? `权益超市-浇花: 浇水成功 (${before}/${need} → ${after}/${need})` : `权益超市-浇花: 浇水成功 (当前进度约 ${before}/${need}，APP可能稍后刷新)`, true); }
   async marketDoTasks(token) { const j=parseJson((await this.request('get','https://backward.bol.wo.cn/prod-api/promotion/activityTask/getAllActivityTasks?activityId=12',{headers:{...this.marketHeaders(token), Cookie:`ecs_token=${this.ecs_token}`}}))?.body)||{}; const list=j.data?.activityTaskUserDetailVOList||[]; this.log(`权益超市: 成功获取到 ${list.length} 个任务`); for(const t of list){ const name=t.name||'', done=Number(t.triggeredTime||0)>=Number(t.triggerTime||0); if(done||/购买|秒杀/.test(name)) continue; const key=t.param1||''; let url=''; if(/浏览|查看/.test(name)) url=`https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkView?checkKey=${encodeURIComponent(key)}`; if(/分享/.test(name)) url=`https://backward.bol.wo.cn/prod-api/promotion/activityTaskShare/checkShare?checkKey=${encodeURIComponent(key)}`; if(!url) continue; const r=parseJson((await this.request('post',url,{body:'{}',headers:this.marketHeaders(token,true)}))?.body)||{}; this.log(`权益超市: ${name}: ${r.code===200?'成功':'失败'}`); await wait(800); } }
   async marketPrizeList(token) { const ts=Date.now(), q=`id=12&timeVerRan=${ts}`; const sig=await marketSignature(token,q,'{}'); const j=parseJson((await this.request('post',`https://backward.bol.wo.cn/prod-api/promotion/home/raffleActivity/prizeList?${q}`,{body:'{}',headers:{...this.marketHeaders(token),...sig,Referer:'https://contact.bol.wo.cn/market'}}))?.body)||{}; const hot=(j.data||[]).filter(p=>/月卡|月会员|月度|VIP月|一个月|周卡/.test(p.name||'')&&!/5G宽视界|沃视频/.test(p.name||'')&&Number(p.dailyPrizeLimit||0)>0); if(hot.length) this.log(`权益超市: 奖池监测到 ${hot.length} 个高价值奖品`, true); }
   async marketDoRaffle(token) { const ts=Date.now(), q=`id=12&channel=unicomTab&timeVerRan=${ts}`; const sig=await marketSignature(token,q,'{}'); const c=parseJson((await this.request('post',`https://backward.bol.wo.cn/prod-api/promotion/home/raffleActivity/getUserRaffleCountExt?${q}`,{body:'{}',headers:{...this.marketHeaders(token),...sig,Referer:'https://contact.bol.wo.cn/market'}}))?.body)||{}; let n=Number((typeof c.data==='object'?c.data?.raffleCount:c.data)||0); if(n<=0) return this.log('权益超市: 当前无抽奖次数'); this.log(`权益超市: 当前抽奖次数: ${n}`); while(n-->0){ const q2=`id=12&channel=unicomTab&timeVerRan=${Date.now()}`, sig2=await marketSignature(token,q2,'{}'); const j=parseJson((await this.request('post',`https://backward.bol.wo.cn/prod-api/promotion/home/raffleActivity/userRaffle?${q2}`,{body:'{}',headers:{...this.marketHeaders(token),...sig2,Referer:'https://contact.bol.wo.cn/market'}}))?.body)||{}; this.log(`权益超市: 抽奖: ${j.data?.prizesName || j.data?.message || j.msg || responseSummary(j)}`, true); await wait(2500); } }
@@ -506,15 +512,17 @@ async function hmacSha256Base64(key, message){
     return bytesToBase64(new Uint8Array(sig));
   }
   if (typeof $crypto!=='undefined' && $crypto.hmac) return $crypto.hmac('sha256', String(message), String(key), 'base64');
-  return '';
+  return bytesToBase64(hmacSha256Bytes(strToBytes(String(key)), strToBytes(String(message))));
 }
 async function marketSignature(userToken, queryString='', jsonBody=''){
   const token=String(userToken||'').replace(/^Bearer\s+/i,'');
   const loginId=parseJwt(token).loginId || '';
   if(!loginId) return {};
-  const msg=`td:433:tp${queryString}td:334:et${jsonBody || '{}'}td:334:et`;
-  const sig=await hmacSha256Base64(loginId, msg);
-  return sig ? {'X-Signature':sig} : {};
+  const appSecret = md5(`al:ak:${loginId}`);
+  const nonce = uuidv4();
+  const msg = `${loginId}${appSecret}${nonce}${queryString || ''}${jsonBody || ''}`;
+  const sig=await hmacSha256Base64(appSecret, msg);
+  return sig ? {'X-User-Id':loginId,'X-Nonce':nonce,'X-Timestamp':String(Date.now()),'X-Signature':sig,'Content-Type':'application/json'} : {};
 }
 async function cloudDispatcherToken(ticket){
   const timestamp=String(Date.now()), reqSeq=String(Math.floor(123456+Math.random()*76543));
@@ -528,6 +536,10 @@ async function wostoreLogin(ticket){
   const s2=parseJson((await http('post','https://uphone.wostore.cn/h5api/activity-service/user/login',{json:{identityType:'cloudPhoneLogin',code:first,channelId:'ST-Zujian001-gs',activityId:'HD2026033000125',device:'device'},headers:{Origin:'https://uphone.wostore.cn','X-USR-TOKEN':first,'Content-Type':'application/json'}}))?.body)||{};
   return {firstToken:first,user_token:s2.data?.user_token||''};
 }
+function uuidv4(){ return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);}); }
+function hmacSha256Bytes(keyBytes,msgBytes){ const block=64; let key=keyBytes.slice(); if(key.length>block) key=sha256Bytes(key); if(key.length<block) key=key.concat(new Array(block-key.length).fill(0)); const o=new Array(block), i=new Array(block); for(let k=0;k<block;k++){ o[k]=key[k]^0x5c; i[k]=key[k]^0x36; } return sha256Bytes(o.concat(sha256Bytes(i.concat(msgBytes)))); }
+function sha256Bytes(bytes){ const K=[1116352408,1899447441,-1245643825,-373957723,961987163,1508970993,-1841331548,-1424204075,-670586216,310598401,607225278,1426881987,1925078388,-2132889090,-1680079193,-1046744716,-459576895,-272742522,264347078,604807628,770255983,1249150122,1555081692,1996064986,-1740746414,-1473132947,-1341970488,-1084653625,-958395405,-710438585,113926993,338241895,666307205,773529912,1294757372,1396182291,1695183700,1986661051,-2117940946,-1838011259,-1564481375,-1474664885,-1035236496,-949202525,-778901479,-694614492,-200395387,275423344,430227734,506948616,659060556,883997877,958139571,1322822218,1537002063,1747873779,1955562222,2024104815,-2067236844,-1933114872,-1866530822,-1538233109,-1090935817,-965641998]; const H=[1779033703,-1150833019,1013904242,-1521486534,1359893119,-1694144372,528734635,1541459225]; const l=bytes.length, bitLenHi=(l/0x20000000)|0, bitLenLo=(l<<3)>>>0, m=bytes.slice(); m.push(0x80); while((m.length%64)!==56)m.push(0); m.push((bitLenHi>>>24)&255,(bitLenHi>>>16)&255,(bitLenHi>>>8)&255,bitLenHi&255,(bitLenLo>>>24)&255,(bitLenLo>>>16)&255,(bitLenLo>>>8)&255,bitLenLo&255); const w=new Array(64); for(let off=0;off<m.length;off+=64){ for(let t=0;t<16;t++){ const p=off+t*4; w[t]=((m[p]<<24)|(m[p+1]<<16)|(m[p+2]<<8)|m[p+3])|0; } for(let t=16;t<64;t++){ const s0=rotr(w[t-15],7)^rotr(w[t-15],18)^(w[t-15]>>>3), s1=rotr(w[t-2],17)^rotr(w[t-2],19)^(w[t-2]>>>10); w[t]=(((w[t-16]+s0)|0)+((w[t-7]+s1)|0))|0; } let a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7]; for(let t=0;t<64;t++){ const S1=rotr(e,6)^rotr(e,11)^rotr(e,25), ch=(e&f)^(~e&g), temp1=(((((h+S1)|0)+ch)|0)+K[t]+w[t])|0, S0=rotr(a,2)^rotr(a,13)^rotr(a,22), maj=(a&b)^(a&c)^(b&c), temp2=(S0+maj)|0; h=g;g=f;f=e;e=(d+temp1)|0;d=c;c=b;b=a;a=(temp1+temp2)|0; } H[0]=(H[0]+a)|0;H[1]=(H[1]+b)|0;H[2]=(H[2]+c)|0;H[3]=(H[3]+d)|0;H[4]=(H[4]+e)|0;H[5]=(H[5]+f)|0;H[6]=(H[6]+g)|0;H[7]=(H[7]+h)|0; } const out=[]; for(const v of H) out.push((v>>>24)&255,(v>>>16)&255,(v>>>8)&255,v&255); return out; }
+function rotr(x,n){ return (x>>>n)|(x<<(32-n)); }
 function md5(str){
   function cmn(q,a,b,x,s,t){a=add32(add32(a,q),add32(x,t));return add32((a<<s)|(a>>>(32-s)),b)}
   function ff(a,b,c,d,x,s,t){return cmn((b&c)|((~b)&d),a,b,x,s,t)} function gg(a,b,c,d,x,s,t){return cmn((b&d)|(c&(~d)),a,b,x,s,t)} function hh(a,b,c,d,x,s,t){return cmn(b^c^d,a,b,x,s,t)} function ii(a,b,c,d,x,s,t){return cmn(c^(b|(~d)),a,b,x,s,t)}

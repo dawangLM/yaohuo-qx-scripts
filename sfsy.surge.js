@@ -1,7 +1,8 @@
 /**
  * 顺丰速运 Surge 版 v1.1.0-port
- * - HTTP request 模式：自动抓取 Cookie 保存为 sfsyUrl
+ * - HTTP request 模式：自动抓取完整 Cookie 并保存为 sfsyUrl
  * - Cron/Panel 模式：签到、日常积分任务、会员日(26-28)、端午活动
+ * - 自动合并响应 Set-Cookie，尽量延长登录态有效期
  * 说明：Surge 不支持 Python，本文件为 JS 移植版，使用 $persistentStore 保存账号。
  */
 
@@ -34,7 +35,9 @@ async function main() {
   for (let i = 0; i < accounts.length; i++) {
     const refreshed = await tryRefreshCookie(accounts[i], i);
     if (refreshed) accounts[i] = refreshed;
-    results.push(await runAccount(accounts[i], i, allUserIds));
+    const result = await runAccount(accounts[i], i, allUserIds);
+    if (result.account_cookie && result.account_cookie !== accounts[i]) accounts[i] = result.account_cookie;
+    results.push(result);
     await wait(1500);
   }
   const newRaw = accounts.join('&');
@@ -66,19 +69,17 @@ async function main() {
 function captureCookie() {
   const cookie = $request.headers.Cookie || $request.headers.cookie || '';
   if (!cookie || !/sessionId=|_login_mobile_=|_login_user_id_=/.test(cookie)) return $.done({});
-  const keep = [];
-  for (const k of ['sessionId', '_login_mobile_', '_login_user_id_']) {
-    const m = cookie.match(new RegExp(`${k}=([^;]+)`));
-    if (m) keep.push(`${k}=${m[1]}`);
-  }
-  if (keep.length < 2) return $.done({});
-  const ck = keep.join(';');
+  const ck = normalizeCookie(cookie);
+  if (!ck || !/sessionId=|_login_mobile_=|_login_user_id_=/.test(ck)) return $.done({});
   const old = $.getdata('sfsyUrl') || '';
   const phone = (ck.match(/_login_mobile_=([^;]+)/) || [,''])[1];
   const uid = (ck.match(/_login_user_id_=([^;]+)/) || [,''])[1];
   const list = old ? old.split('&').filter(Boolean) : [];
-  const idx = list.findIndex(x => (uid && x.includes(`_login_user_id_=${uid}`)) || (phone && x.includes(`_login_mobile_=${phone}`)));
-  const isNewOrChanged = idx < 0 || list[idx] !== ck;
+  const idx = list.findIndex(x => {
+    const decoded = safeDecode(String(x).split('#')[0]);
+    return (uid && decoded.includes(`_login_user_id_=${uid}`)) || (phone && decoded.includes(`_login_mobile_=${phone}`));
+  });
+  const isNewOrChanged = idx < 0 || safeDecode(String(list[idx]).split('#')[0]) !== ck;
   if (idx >= 0) list[idx] = ck; else list.push(ck);
   $.setdata(list.join('&'), 'sfsyUrl');
   if (isNewOrChanged) {
@@ -97,10 +98,10 @@ async function runAccount(accountRaw, index, allUserIds) {
   const ckValid = await http.validateLogin();
   if (!ckValid) {
     logger.error(`CK 预检失败: ${http.ckInvalidMessage || '登录态已失效，请重新抓取 Cookie'}`);
-    return {success:false, phone:login.phone, index, points_earned:0, dragon_gold:0, dragon_prizes:[], member_day_prizes:[], ck_invalid:true, fail_reason:http.ckInvalidMessage || 'CK失效了，请重新抓取'};
+    return {success:false, phone:login.phone, index, points_earned:0, dragon_gold:0, dragon_prizes:[], member_day_prizes:[], ck_invalid:true, fail_reason:http.ckInvalidMessage || 'CK失效了，请重新抓取', account_cookie:http.ckRefreshed ? http.cookie : ''};
   }
   logger.success(`【${maskPhone(login.phone)}】登录验证通过`);
-  const result = {success:true, phone:login.phone, index, points_before:0, points_after:0, points_earned:0, member_day_prizes:[], dragon_gold:0, dragon_prizes:[], ck_invalid:false};
+  const result = {success:true, phone:login.phone, index, points_before:0, points_after:0, points_earned:0, member_day_prizes:[], dragon_gold:0, dragon_prizes:[], ck_invalid:false, account_cookie:''};
   if (ENABLE_DAILY_TASK) {
     const daily = new DailyTaskExecutor(http, logger, login.userId);
     await daily.dualSignIn();
@@ -119,12 +120,13 @@ async function runAccount(accountRaw, index, allUserIds) {
     result.dragon_gold = dr.gold_coin || 0; result.dragon_prizes = dr.prizes || [];
   }
   if (http.ckInvalid) { result.success = false; result.ck_invalid = true; result.fail_reason = http.ckInvalidMessage || 'CK失效了'; }
+  if (http.ckRefreshed) result.account_cookie = http.cookie;
   return result;
 }
 
 class SFHttpClient {
   constructor(cookie, logger) {
-    this.cookie = safeDecode(cookie);
+    this.cookie = normalizeCookie(safeDecode(cookie));
     this.logger = logger;
     this.ckInvalid = false;
     this.ckInvalidMessage = '';
@@ -137,7 +139,7 @@ class SFHttpClient {
   login() {
     const phone = (this.cookie.match(/_login_mobile_=([^;]+)/) || [,''])[1];
     const userId = (this.cookie.match(/_login_user_id_=([^;]+)/) || [,''])[1];
-    return {success: !!phone, phone, userId};
+    return {success: !!phone && !!userId, phone, userId};
   }
   async validateLogin() {
     const r = await this.post(`${BASE}/mcs-mimp/commonPost/~memberNonactivity~integralTaskStrategyService~queryPointTaskAndSignFromES`, {channelType:'1', deviceId:'00000000-0000-0000-0000-000000000000'});
@@ -161,21 +163,17 @@ class SFHttpClient {
     if (CK_INVALID_KEYWORDS.some(k => text.includes(k))) { this.ckInvalid = true; this.ckInvalidMessage = result.errorMessage || result.message || result.msg || 'CK失效了'; }
   }
   extractNewCookie(respHeaders) {
-    const sc = respHeaders['Set-Cookie'] || respHeaders['set-cookie'] || '';
-    if (!sc) return;
-    const newParts = [];
+    const sc = respHeaders['Set-Cookie'] || respHeaders['set-cookie'] || respHeaders['set-Cookie'];
+    const parsed = parseSetCookie(sc);
+    if (!Object.keys(parsed).length) return;
+    const old = parseCookieString(this.cookie);
     let changed = false;
-    for (const k of ['sessionId', '_login_mobile_', '_login_user_id_']) {
-      const m = sc.match(new RegExp(`${k}=([^;]+)`));
-      if (m) {
-        const nv = `${k}=${m[1]}`;
-        newParts.push(nv);
-        if (!this.cookie.includes(nv)) changed = true;
-      }
+    for (const [k, v] of Object.entries(parsed)) {
+      if (old[k] !== v) { old[k] = v; changed = true; }
     }
-    if (newParts.length >= 2 && changed) {
-      this.logger.success('检测到新 Cookie，自动更新');
-      this.cookie = newParts.join(';');
+    if (changed) {
+      this.logger.success('检测到响应 Set-Cookie，已合并更新 Cookie');
+      this.cookie = serializeCookies(old);
       this.headers.Cookie = this.cookie;
       this.ckRefreshed = true;
     }
@@ -258,6 +256,37 @@ class DragonBoatExecutor {
 
 class Logger { constructor(prefix){this.prefix=prefix;} line(i,m){ $.log(`${i} ${this.prefix} ${m}`); } info(m){this.line('📝',m)} success(m){this.line('✅',m)} error(m){this.line('❌',m)} task(m){this.line('🎯',m)} points(p,pre='当前积分'){this.line('💰',`${pre}: 【${p}】`)} }
 function readBool(k,d){ const v=$.getdata(k); return v==null||v===''?d:!['0','false','False','FALSE'].includes(v); }
+function parseCookieString(s){
+  const out = {};
+  String(s || '').split(';').forEach(p => {
+    const i = p.indexOf('=');
+    if (i > 0) {
+      const k = p.slice(0, i).trim();
+      if (k) out[k] = p.slice(i + 1).trim();
+    }
+  });
+  return out;
+}
+function parseSetCookie(s){
+  const out = {};
+  if (!s) return out;
+  const arr = Array.isArray(s) ? s : String(s).split(/,(?=\s*[^;,]+=)/);
+  for (const c of arr) {
+    const first = String(c).split(';')[0];
+    const i = first.indexOf('=');
+    if (i > 0) {
+      const k = first.slice(0, i).trim();
+      const v = first.slice(i + 1).trim();
+      if (k && v && !/^deleted$/i.test(v)) out[k] = v;
+    }
+  }
+  return out;
+}
+function serializeCookies(obj){ return Object.entries(obj || {}).filter(([k,v]) => k && v != null && v !== '').map(([k,v]) => `${k}=${v}`).join('; '); }
+function normalizeCookie(cookie){
+  const parsed = parseCookieString(cookie);
+  return serializeCookies(parsed);
+}
 function safeDecode(s){ try { return decodeURIComponent(String(s || '')); } catch { return String(s || ''); } }
 function formatError(e){ return (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e); }
 function maskPhone(p){ return p && p.length>=7 ? p.slice(0,3)+'****'+p.slice(7) : (p||''); }
@@ -271,8 +300,9 @@ function finish(content){ $.log(content); $.msg('顺丰速运自动任务', '', 
 // 通过 sign 签到刷新 CK：先尝试小程序签到，再尝试 APP 签到
 async function tryRefreshCookie(accountRaw, index) {
   const logger = new Logger(`账号${index + 1} 刷新`);
-  const ck = safeDecode(accountRaw.split('#')[0].trim());
+  const ck = normalizeCookie(safeDecode(accountRaw.split('#')[0].trim()));
   const http = new SFHttpClient(ck, logger);
+  if (!http.login().success) return null;
   // 调用小程序签到，响应头可能带回新的 Set-Cookie
   const headers1 = {'platform':'MINI_PROGRAM','channel':'wxwddoudi'};
   await http.post(`${BASE}/mcs-mimp/commonPost/~memberNonactivity~integralSignV2Service~sign`, {}, headers1);

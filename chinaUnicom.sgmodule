@@ -1,5 +1,5 @@
 #!name=中国联通自动任务
-#!desc=Surge 模块：重写抓取 token_online/appId，脚本执行中国联通签到区、天天领现金等常用任务（Surge 版）。安装后先打开中国联通 APP 登录并触发首页。
+#!desc=Surge 模块：抓取 token_online/appId，执行中国联通核心可跑任务（资产、首页签到、天天领现金、通通乡村等）。Python 高复杂模块将分阶段移植。安装后先打开中国联通 APP 登录并触发首页。
 #!author=Reasonix port
 
 [MITM]

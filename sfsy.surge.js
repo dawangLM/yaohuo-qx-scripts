@@ -19,7 +19,11 @@ const MEMBER_DAY_SKIP_TASK_TYPES = ['SEND_SUCCESS', 'INVITEFRIENDS_PARTAKE_ACTIV
 const CK_INVALID_KEYWORDS = ['未登录','请登录','请先登录','登录失效','登录已失效','登录过期','会话失效','session失效','sessionid失效','sessionid已失效','token失效','重新登录','not_login','unauthorized'];
 const DRAGON_EXCLUDE = [/9折寄件券/, /(?:^|[^1])2元寄件券/, /92折寄件券/, /2元寄件券[（(]满20元可用[）)]/, /海底捞7\.9折夜宵券/, /5元寄件券/];
 
-!(async () => {
+setTimeout(() => {
+  main().catch(e => finish(`运行异常: ${formatError(e)}`));
+}, 0);
+
+async function main() {
   if (typeof $request !== 'undefined') return captureCookie();
   const raw = $.getdata('sfsyUrl') || $.getdata('sfsy_cookie') || '';
   if (!raw) return finish('未找到 sfsyUrl，请先打开顺丰速运小程序触发抓取');
@@ -50,7 +54,7 @@ const DRAGON_EXCLUDE = [/9折寄件券/, /(?:^|[^1])2元寄件券/, /92折寄件
   }
   lines.push(`📱 总账号: ${results.length} | 💰 总积分+${totalEarned}` + (ENABLE_DRAGON_BOAT ? ` | 端午金币${totalDragonGold}` : ''));
   finish(lines.join('\n'));
-})().catch(e => finish(`运行异常: ${e.stack || e}`));
+}
 
 function captureCookie() {
   const cookie = $request.headers.Cookie || $request.headers.cookie || '';
@@ -215,6 +219,7 @@ class DragonBoatExecutor {
 class Logger { constructor(prefix){this.prefix=prefix;} line(i,m){ $.log(`${i} ${this.prefix} ${m}`); } info(m){this.line('📝',m)} success(m){this.line('✅',m)} error(m){this.line('❌',m)} task(m){this.line('🎯',m)} points(p,pre='当前积分'){this.line('💰',`${pre}: 【${p}】`)} }
 function readBool(k,d){ const v=$.getdata(k); return v==null||v===''?d:!['0','false','False','FALSE'].includes(v); }
 function safeDecode(s){ try { return decodeURIComponent(String(s || '')); } catch { return String(s || ''); } }
+function formatError(e){ return (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e); }
 function maskPhone(p){ return p && p.length>=7 ? p.slice(0,3)+'****'+p.slice(7) : (p||''); }
 function isLowValue(text){ if (!/[券红包]/.test(text)) return false; const ms = text.match(/(\d+(?:\.\d+)?)\s*元/g)||[]; return ms.some(x => parseFloat(x) < DRAGON_BOAT_LOW_VALUE_LIMIT); }
 function filterDragonPrizes(ps){ return ps.filter(p => !DRAGON_EXCLUDE.some(r=>r.test(p)) && !isLowValue(p)); }
